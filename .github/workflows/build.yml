@@ -7,27 +7,22 @@ on:
       - main
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 修复 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-      # 关掉 submodules: recursive，改为手动处理
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: false      # ← 先不拉子模块
+          submodules: false
           fetch-depth: 0
 
-      # 手动初始化子模块，强制从上游原始仓库拉取
       - name: Init submodules from upstream
         run: |
           git submodule init
-          # 强制把 RootHelper 子模块的 URL 指向上游原始仓库
-          git config submodule.RootHelper.url https://github.com/Wtrwx/Geranium.git || true
-          # 读取 .gitmodules 里真实的上游地址来覆盖
           git submodule sync
           git submodule update --init --recursive --remote
 
@@ -49,7 +44,7 @@ jobs:
           git sparse-checkout set iPhoneOS15.6.sdk
           cp -r iPhoneOS15.6.sdk $THEOS/sdks/
           echo "✅ SDK installed: $(ls $THEOS/sdks/)"
-      
+
       - name: Patch RootHelper SDK version
         run: |
           sed -i '' 's/iPhoneOS14.5.sdk/iPhoneOS15.6.sdk/g' RootHelper/Makefile
