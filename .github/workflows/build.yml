@@ -6,15 +6,30 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 修复 Node.js 20 弃用警告
+
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
+      # 关掉 submodules: recursive，改为手动处理
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false      # ← 先不拉子模块
+          fetch-depth: 0
+
+      # 手动初始化子模块，强制从上游原始仓库拉取
+      - name: Init submodules from upstream
+        run: |
+          git submodule init
+          # 强制把 RootHelper 子模块的 URL 指向上游原始仓库
+          git config submodule.RootHelper.url https://github.com/Wtrwx/Geranium.git || true
+          # 读取 .gitmodules 里真实的上游地址来覆盖
+          git submodule sync
+          git submodule update --init --recursive --remote
 
       - name: Select Xcode
         run: |
@@ -27,7 +42,6 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git ~/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      # 修改点：从 theos/sdks 仓库只拉取 iPhoneOS15.6.sdk
       - name: Install iPhoneOS 15.6 SDK
         run: |
           git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git ~/theos-sdks
