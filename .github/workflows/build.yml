@@ -14,8 +14,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          fetch-depth: 0
+          submodules: false      # 不自动拉取子模块
+          fetch-depth: 1
+
+      # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
+      - name: Clone RootHelper manually
+        run: |
+          rm -rf RootHelper   # 清掉空目录占位
+          git clone https://github.com/c22dev/Geranium-RH.git RootHelper
 
       - name: Select Xcode
         run: |
