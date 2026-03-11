@@ -81,6 +81,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO
+            PRODUCT_BUNDLE_IDENTIFIER="com.private.geranium" \  # 👈 改这里
+            PRODUCT_NAME="iGeranium"                          # 👈 改这里（系统显示名）
+
 
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
