@@ -1,59 +1,77 @@
-name: Geranium Build
+name: Build Geranium IPA
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: macos-latest
-    
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        submodules: recursive
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Setup Xcode
-      run: |
-        sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-        sudo xcodebuild -license accept
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -switch /Applications/Xcode_16.2.app
+          xcodebuild -version
 
-    - name: Install dependencies
-      run: |
-        brew install ldid xz git
-        brew install --cask macfuse
+      - name: Install Theos
+        run: |
+          brew install ldid xz
+          git clone --recursive https://github.com/theos/theos.git ~/theos
+          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-    - name: Install Theos (修正版)
-      run: |
-        # 克隆到可写目录   
-        git clone --recursive https://github.com/theos/sdks.git $HOME/theos
-        echo "THEOS=$HOME/theos" >> $GITHUB_ENV
-        echo "export THEOS=$THEOS" >> $GITHUB_ENV
-        echo "export PATH=$THEOS/bin:$THEOS/libexec:$PATH" >> $GITHUB_ENV
-        source $GITHUB_ENV
-        
-        # 创建符号链接到可写目录
-        mkdir -p $HOME/theos/makefiles
-        ln -s $THEOS/makefiles/common.mk $HOME/theos/common.mk
-        ln -s $THEOS/makefiles/tool.mk $HOME/theos/tool.mk
+      # 修改点：从 theos/sdks 仓库只拉取 iPhoneOS15.6.sdk
+      - name: Install iPhoneOS 15.6 SDK
+        run: |
+          git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git ~/theos-sdks
+          cd ~/theos-sdks
+          git sparse-checkout set iPhoneOS15.6.sdk
+          cp -r iPhoneOS15.6.sdk $THEOS/sdks/
+          echo "✅ SDK installed: $(ls $THEOS/sdks/)"
 
-    - name: Extract iPhoneOS14.5 SDK
-      run: |
-        mkdir -p $THEOS/sdks
-        tar xJf ./iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks
-        [ -d "$THEOS/sdks/iPhoneOS14.5.sdk" ] || { echo "SDK extraction failed"; exit 1; }
+      - name: Build RootHelper
+        run: |
+          cd RootHelper
+          make package FINALPACKAGE=1
+        env:
+          THEOS: ${{ env.THEOS }}
 
-    - name: Build project (修正版)
-      run: |
-        chmod +x ./ipabuild.sh
-        ./ipabuild.sh --signingIdentity="iPhone Distribution: im-82wk"
+      - name: Build Geranium with Xcode
+        run: |
+          xcodebuild \
+            -project Geranium.xcodeproj \
+            -scheme Geranium \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build/DerivedData \
+            SDKROOT=$THEOS/sdks/iPhoneOS15.6.sdk \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
 
-    - name: Upload IPA
-      uses: actions/upload-artifact@v4
-      with:
-        name: Geranium-IPA
-        path: build/*.tipa
+      - name: Run ipabuild.sh
+        run: |
+          chmod +x ipabuild.sh
+          bash ipabuild.sh
+
+      - name: Rename tipa to ipa
+        run: |
+          find build/ -name "*.tipa" -exec bash -c 'cp "$1" "${1%.tipa}.ipa"' _ {} \;
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Geranium-IPA
+          path: |
+            build/*.ipa
+            build/*.tipa
+          if-no-files-found: error
+          retention-days: 30
