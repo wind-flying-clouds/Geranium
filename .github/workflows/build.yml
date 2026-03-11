@@ -49,6 +49,11 @@ jobs:
           git sparse-checkout set iPhoneOS15.6.sdk
           cp -r iPhoneOS15.6.sdk $THEOS/sdks/
           echo "✅ SDK installed: $(ls $THEOS/sdks/)"
+      
+      - name: Patch RootHelper SDK version
+        run: |
+          sed -i '' 's/iPhoneOS14.5.sdk/iPhoneOS15.6.sdk/g' RootHelper/Makefile
+          echo "✅ Patched: $(grep 'SDK' RootHelper/Makefile)"
 
       - name: Build RootHelper
         run: |
