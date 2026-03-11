@@ -22,6 +22,10 @@ jobs:
         run: |
           rm -rf RootHelper   # 清掉空目录占位
           git clone https://github.com/c22dev/Geranium-RH.git RootHelper
+          # 让 git 认为子模块已经 checkout，不再尝试拉取失效 commit
+          git config submodule.RootHelper.url https://github.com/c22dev/Geranium-RH.git
+          git submodule absorbgitdirs
+          git config --file .gitmodules submodule.RootHelper.update none
 
       - name: Select Xcode
         run: |
@@ -82,6 +86,9 @@ jobs:
       - name: Run ipabuild.sh
         run: |
           chmod +x ipabuild.sh
+          # ipabuild.sh 内部会再次 git submodule update，遇到失效 commit 会崩
+          # 用 sed 删掉这一行，因为 RootHelper 我们已经手动 clone 好了
+          sed -i '' '/git submodule update/d' ipabuild.sh
           bash ipabuild.sh
 
       # 将 .tipa 同时复制一份 .ipa 后缀（两者内容完全相同）
