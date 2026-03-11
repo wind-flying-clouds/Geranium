@@ -28,6 +28,12 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode_16.2.app
           xcodebuild -version
 
+      # 👇 新增这一步，安装 iOS 平台运行时，解决 ibtool 找不到 iOS 18.2 的问题
+      - name: Install iOS platform
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -downloadPlatform iOS
+
       # 安装 Theos 依赖
       - name: Install dependencies
         run: brew install ldid xz
