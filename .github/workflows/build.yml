@@ -6,9 +6,6 @@ on:
     branches:
       - main
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: macos-latest
@@ -17,39 +14,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: false
-          fetch-depth: 0
-
-      - name: Init submodules from upstream
-        run: |
-          git submodule init
-          git submodule sync
-          git submodule update --init --recursive --remote
+          submodules: recursive
 
       - name: Select Xcode
         run: |
           sudo xcode-select -switch /Applications/Xcode_16.2.app
           xcodebuild -version
 
+      # 安装 Theos 依赖
+      - name: Install dependencies
+        run: brew install ldid xz
+
+      # 克隆 Theos（不含子模块，后面单独处理 SDK，加快速度）
       - name: Install Theos
         run: |
-          brew install ldid xz
-          git clone --recursive https://github.com/theos/theos.git ~/theos
+          git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      - name: Install iPhoneOS 15.6 SDK
+      # 直接用指定 release 地址下载 iPhoneOS14.5.sdk
+      - name: Install iPhoneOS 14.5 SDK
         run: |
-          git clone --depth=1 --filter=blob:none --sparse https://github.com/theos/sdks.git ~/theos-sdks
-          cd ~/theos-sdks
-          git sparse-checkout set iPhoneOS15.6.sdk
-          cp -r iPhoneOS15.6.sdk $THEOS/sdks/
-          echo "✅ SDK installed: $(ls $THEOS/sdks/)"
+          curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz \
+            -o iPhoneOS14.5.sdk.tar.xz
+          tar -xJf iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks/
+          rm iPhoneOS14.5.sdk.tar.xz
+          echo "已安装 SDK："
+          ls $THEOS/sdks/
 
-      - name: Patch RootHelper SDK version
-        run: |
-          sed -i '' 's/iPhoneOS14.5.sdk/iPhoneOS15.6.sdk/g' RootHelper/Makefile
-          echo "✅ Patched: $(grep 'SDK' RootHelper/Makefile)"
-
+      # 构建 RootHelper
       - name: Build RootHelper
         run: |
           cd RootHelper
@@ -57,6 +49,7 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
+      # 构建主应用，不签名
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -66,20 +59,23 @@ jobs:
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
-            SDKROOT=$THEOS/sdks/iPhoneOS15.6.sdk \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO
 
+      # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
         run: |
           chmod +x ipabuild.sh
           bash ipabuild.sh
 
+      # 将 .tipa 同时复制一份 .ipa 后缀（两者内容完全相同）
       - name: Rename tipa to ipa
         run: |
-          find build/ -name "*.tipa" -exec bash -c 'cp "$1" "${1%.tipa}.ipa"' _ {} \;
+          find build/ -name "*.tipa" -exec bash -c \
+            'cp "$1" "${1%.tipa}.ipa"' _ {} \;
 
+      # 上传产物（修复 Node.js 20 弃用警告：统一用 v4）
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
