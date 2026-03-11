@@ -52,6 +52,8 @@ jobs:
       - name: Build RootHelper
         run: |
           cd RootHelper
+          # 把 control 里的包名强制转小写
+          sed -i '' 's/^Package:.*/Package: geraniumroothelper/' control
           make package FINALPACKAGE=1
         env:
           THEOS: ${{ env.THEOS }}
