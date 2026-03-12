@@ -17,19 +17,16 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: Modify bundle IDs and names
+      - name: Modify bundle IDs and app name (核心需求)
         run: |
-          # 1. 修改主应用 Bundle ID 和名称（核心需求）
+          # 1. 修改主应用 Info.plist（云踪 + com.cloud.trail）
           plutil -replace CFBundleIdentifier -string "com.cloud.trail" Geranium/Info.plist
           plutil -replace CFBundleDisplayName -string "云踪" Geranium/Info.plist
           plutil -replace CFBundleName -string "云踪" Geranium/Info.plist
           
-          # 2. 替换 project.pbxproj 中的旧 Bundle ID
+          # 2. 替换项目中旧的 Bundle ID
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' Geranium.xcodeproj/project.pbxproj
           sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' Geranium.xcodeproj/project.pbxproj
-          
-          # 3. 设置最低部署版本为 16.0
-          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' Geranium.xcodeproj/project.pbxproj
 
       - name: Clone RootHelper
         run: |
@@ -37,22 +34,11 @@ jobs:
           git clone https://github.com/c22dev/Geranium-RH.git RootHelper
           git config submodule.RootHelper.url https://github.com/c22dev/Geranium-RH.git
           git submodule absorbgitdirs
-          git config --file .gitmodules submodule.RootHelper.update none
 
-      - name: Select compatible Xcode
-        run: |
-          # 优先用 Xcode 15.x，避免 iOS 18 平台问题
-          XCODE_15_PATH=$(ls -d /Applications/Xcode_15*.app | head -1)
-          if [ -n "$XCODE_15_PATH" ]; then
-            sudo xcode-select -switch "$XCODE_15_PATH"
-          fi
-          xcodebuild -version
-          xcodebuild -showsdks | grep iphoneos
-
-      - name: Install dependencies
+      - name: Install basic dependencies
         run: brew install ldid xz
 
-      - name: Install Theos
+      - name: Install Theos (for RootHelper)
         run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
@@ -72,20 +58,18 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 🚨 终极修复：改用 scheme + 移除冗余参数 + 兼容 Xcode 规则
-      - name: Build Geranium (final fix)
+      # 🚨 核心修复：不指定 SDK 版本，让 Xcode 自动选择可用的
+      - name: Build Geranium (auto select available SDK)
         run: |
-          # 自动获取可用的 iOS 17.x SDK
-          SDK_VERSION=$(xcodebuild -showsdks | grep iphoneos | grep -E "17\.[0-9]" | awk '{print $2}' | sed 's/iphoneos//' | tail -1)
-          [ -z "$SDK_VERSION" ] && SDK_VERSION="17.0"
-          echo "使用 SDK 版本：iphoneos${SDK_VERSION}"
+          # 打印所有可用 SDK，确认环境
+          echo "=== 所有可用 SDK ==="
+          xcodebuild -showsdks
           
-          # 核心修改：用 -scheme 替代 -target，移除 -derivedDataPath 避免参数冲突
+          # 构建：移除 -sdk 参数，Xcode 自动用当前完整的 SDK
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
             -configuration Release \
-            -sdk iphoneos${SDK_VERSION} \
             -destination "generic/platform=iOS" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -95,31 +79,32 @@ jobs:
             ONLY_ACTIVE_ARCH=NO \
             BUILD_DIR=./build
 
-      # 手动打包 IPA（最简版）
-      - name: Package IPA
+      # 手动打包 IPA
+      - name: Package IPA (final step)
         run: |
-          # 找到构建好的 .app 文件
-          APP_PATH=$(find ./build/Release-iphoneos -name "Geranium.app" -type d)
+          # 查找构建好的 app 文件
+          APP_PATH=$(find ./build/Release-iphoneos -name "Geranium.app" -type d -print -quit)
           if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到 Geranium.app，构建失败！"
-            ls -la ./build/Release-iphoneos/
+            echo "❌ 未找到 Geranium.app，打印目录排查："
+            ls -la ./build/
             exit 1
           fi
           
           # 打包 IPA
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r Geranium-云踪.ipa Payload/
+          zip -r Geranium-云踪_$(date +%Y%m%d).ipa Payload/
           rm -rf Payload
           
           # 移动到 build 目录方便上传
-          mv Geranium-云踪.ipa ./build/
-          echo "✅ IPA 生成成功：$(ls ./build/*.ipa)"
+          mkdir -p build
+          mv Geranium-云踪_*.ipa build/
+          echo "✅ IPA 生成成功：$(ls build/*.ipa)"
 
-      # 上传产物
-      - name: Upload IPA
+      # 上传 IPA 产物
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Geranium-IPA
+          name: Geranium-IPA-云踪
           path: build/*.ipa
           if-no-files-found: warn
