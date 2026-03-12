@@ -25,7 +25,7 @@ jobs:
             Geranium.xcodeproj/project.pbxproj
 
           /usr/libexec/PlistBuddy -c \
-            "Set :CFBundleDisplayName CloudRoam" \
+            "Set :CFBundleDisplayName com.private.CloudRoam" \
             Geranium/Info.plist
 
           /usr/libexec/PlistBuddy -c \
