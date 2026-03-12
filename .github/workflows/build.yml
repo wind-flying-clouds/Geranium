@@ -17,40 +17,21 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: Modify bundle IDs and names (main + extension)
+      - name: Modify bundle IDs and names
         run: |
-          # 定义路径
-          PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
-          MAIN_PLIST_FILE="Geranium/Info.plist"
+          # 1. 修改主应用 Bundle ID 和名称（核心需求）
+          plutil -replace CFBundleIdentifier -string "com.cloud.trail" Geranium/Info.plist
+          plutil -replace CFBundleDisplayName -string "云踪" Geranium/Info.plist
+          plutil -replace CFBundleName -string "云踪" Geranium/Info.plist
           
-          # 检查文件存在性
-          if [ ! -f "$PROJECT_FILE" ] || [ ! -f "$MAIN_PLIST_FILE" ]; then
-            echo "Error: 核心文件缺失！"
-            exit 1
-          fi
-
-          # 1. 修改主应用配置
-          sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE"
-          sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
+          # 2. 替换 project.pbxproj 中的旧 Bundle ID
+          sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' Geranium.xcodeproj/project.pbxproj
+          sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' Geranium.xcodeproj/project.pbxproj
           
-          # 主应用 Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 云踪" "$MAIN_PLIST_FILE" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 云踪" "$MAIN_PLIST_FILE"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleName 云踪" "$MAIN_PLIST_FILE" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleName string 云踪" "$MAIN_PLIST_FILE"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.cloud.trail" "$MAIN_PLIST_FILE" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail" "$MAIN_PLIST_FILE"
+          # 3. 设置最低部署版本为 16.0
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' Geranium.xcodeproj/project.pbxproj
 
-          # 2. 修改扩展配置（独立名称）
-          EXT_PLIST_LIST=$(find . -name "Info.plist" | grep -i "bookmark" | grep -v "Preview" | grep -v "Assets")
-          for EXT_PLIST in $EXT_PLIST_LIST; do
-            if /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST" 2>/dev/null; then
-              /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.cloud.trail.BookmarkLocation" "$EXT_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
-              /usr/libexec/PlistBuddy -c "Set :CFBundleName 云踪-书签扩展" "$EXT_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleName string 云踪-书签扩展" "$EXT_PLIST"
-            fi
-          done
-
-          # 3. 修改 project.pbxproj 中的最低部署版本为 16.0（兼容旧 SDK）
-          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' "$PROJECT_FILE"
-
-      - name: Clone RootHelper manually
+      - name: Clone RootHelper
         run: |
           rm -rf RootHelper
           git clone https://github.com/c22dev/Geranium-RH.git RootHelper
@@ -58,21 +39,14 @@ jobs:
           git submodule absorbgitdirs
           git config --file .gitmodules submodule.RootHelper.update none
 
-      # 强制切换到有完整平台组件的 Xcode 版本
-      - name: Select compatible Xcode version
+      - name: Select compatible Xcode
         run: |
-          # 优先使用 Xcode 15.x，如果不存在则用默认
+          # 优先用 Xcode 15.x，避免 iOS 18 平台问题
           XCODE_15_PATH=$(ls -d /Applications/Xcode_15*.app | head -1)
           if [ -n "$XCODE_15_PATH" ]; then
             sudo xcode-select -switch "$XCODE_15_PATH"
-          else
-            XCODE_PATH=$(ls -d /Applications/Xcode*.app | head -1)
-            sudo xcode-select -switch "$XCODE_PATH"
           fi
-          # 打印可用的 SDK 版本（确认 17.x 存在）
-          echo "=== Xcode 版本信息 ==="
           xcodebuild -version
-          echo "=== 可用 iOS SDK 列表 ==="
           xcodebuild -showsdks | grep iphoneos
 
       - name: Install dependencies
@@ -98,64 +72,52 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 🚨 核心修复：修正语法错误 + 完整构建命令
-      - name: Build Geranium (fixed syntax + iOS 17 SDK)
+      # 🚨 终极修复：改用 scheme + 移除冗余参数 + 兼容 Xcode 规则
+      - name: Build Geranium (final fix)
         run: |
-          # 强制使用 iOS 17.x SDK（优先 17.5，无则 17.0）
+          # 自动获取可用的 iOS 17.x SDK
           SDK_VERSION=$(xcodebuild -showsdks | grep iphoneos | grep -E "17\.[0-9]" | awk '{print $2}' | sed 's/iphoneos//' | tail -1)
-          if [ -z "$SDK_VERSION" ]; then
-            SDK_VERSION="17.0"
-          fi
-          echo "使用兼容的 iOS SDK 版本：$SDK_VERSION"
+          [ -z "$SDK_VERSION" ] && SDK_VERSION="17.0"
+          echo "使用 SDK 版本：iphoneos${SDK_VERSION}"
           
-          # 构建主应用（修正语法：移除行内注释，确保参数连续）
+          # 核心修改：用 -scheme 替代 -target，移除 -derivedDataPath 避免参数冲突
           xcodebuild \
             -project Geranium.xcodeproj \
-            -target Geranium \
+            -scheme Geranium \
             -configuration Release \
             -sdk iphoneos${SDK_VERSION} \
             -destination "generic/platform=iOS" \
-            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
             PRODUCT_NAME="云踪" \
-            VALIDATE_PRODUCT=NO \
-            ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ENABLE_PREVIEWS=NO \
-            ASSETCATALOG_COMPILER_OPTIMIZATION=space \
-            SKIP_INSTALL=NO \
-            BUILD_LIBRARY_FOR_DISTRIBUTION=NO
+            ONLY_ACTIVE_ARCH=NO \
+            BUILD_DIR=./build
 
-      # 手动打包 IPA（最稳定的方式）
-      - name: Package IPA manually
+      # 手动打包 IPA（最简版）
+      - name: Package IPA
         run: |
-          # 检查主应用是否构建成功
-          APP_PATH=$(find build/DerivedData -name "Geranium.app" -type d | head -1)
+          # 找到构建好的 .app 文件
+          APP_PATH=$(find ./build/Release-iphoneos -name "Geranium.app" -type d)
           if [ -z "$APP_PATH" ]; then
-            echo "Error: 主应用构建失败，未找到 Geranium.app！"
-            ls -la build/DerivedData/Build/Products/
+            echo "❌ 未找到 Geranium.app，构建失败！"
+            ls -la ./build/Release-iphoneos/
             exit 1
           fi
           
-          # 创建 IPA 打包目录
-          mkdir -p build/IPA/Payload
-          # 复制主应用到 Payload
-          cp -R "$APP_PATH" build/IPA/Payload/
-          # 打包成 IPA
-          cd build/IPA
-          zip -r "../Geranium-云踪_$(date +%Y%m%d).ipa" Payload/
-          # 清理临时文件
-          cd ../
-          rm -rf IPA
+          # 打包 IPA
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r Geranium-云踪.ipa Payload/
+          rm -rf Payload
           
-          # 验证 IPA 是否生成
-          echo "=== 生成的 IPA 文件 ==="
-          ls -la build/*.ipa
+          # 移动到 build 目录方便上传
+          mv Geranium-云踪.ipa ./build/
+          echo "✅ IPA 生成成功：$(ls ./build/*.ipa)"
 
       # 上传产物
-      - name: Upload IPA artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: Geranium-IPA
