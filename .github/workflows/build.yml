@@ -39,6 +39,7 @@ jobs:
             echo "Error: $PROJECT_FILE 不存在！"
             exit 1
           fi
+          # 修复了这里的空格问题
           if[ ! -f "$PLIST_FILE" ]; then
             echo "Error: $PLIST_FILE 不存在！"
             exit 1
