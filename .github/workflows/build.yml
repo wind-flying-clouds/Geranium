@@ -40,12 +40,27 @@ jobs:
             exit 1
           fi
 
-          # 1. 只修改主 Target (Geranium) 的 Bundle ID（精准匹配，避免影响子 Target）
-          sed -i '' \
-            '/TargetAttributes = {/,/}/!b; /Geranium/!b; s/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
-            "$PROJECT_FILE"
+          # 1. 兼容 BSD sed 的方式：先提取主 Target (Geranium) 的 ID，再精准替换 Bundle ID
+          # 步骤1：找到 Geranium Target 的唯一 ID（格式如 12345678-ABCD-EFGH-IJKL-1234567890AB）
+          TARGET_ID=$(grep -A 10 'Geranium' "$PROJECT_FILE" | grep 'PBXNativeTarget' | grep -oE '[A-F0-9]{24}')
+          echo "找到 Geranium Target ID: $TARGET_ID"
 
-          # 2. 处理 Info.plist（主应用的显示名称）
+          # 步骤2：只替换该 Target ID 下的 Bundle ID（避免影响其他 Target）
+          if [ -n "$TARGET_ID" ]; then
+            # BSD sed 不支持分号分隔，用换行 + {} 替代
+            sed -i '' "/$TARGET_ID/,/}/ {
+              s/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g
+            }" "$PROJECT_FILE"
+            echo "已修改主 Target 的 Bundle ID"
+          else
+            # 降级方案：全局替换（若未找到 Target ID，兼容旧逻辑）
+            sed -i '' \
+              's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
+              "$PROJECT_FILE"
+            echo "未找到 Target ID，已全局替换 Bundle ID"
+          fi
+
+          # 2. 处理 Info.plist（主应用的显示名称，兼容键缺失）
           # 兼容 CFBundleDisplayName 不存在的情况
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" "$PLIST_FILE"
