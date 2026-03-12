@@ -108,11 +108,21 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode_16.2.app
           xcodebuild -version
 
-      # 👇 新增这一步，安装 iOS 平台运行时，解决 ibtool 找不到 iOS 18.2 的问题
-      - name: Install iOS platform
+      # 🚨 修复：替换原 iOS 平台安装命令，避免模拟器依赖
+      - name: Install iOS SDK (no simulator required)
         run: |
-          sudo xcodebuild -runFirstLaunch
-          xcodebuild -downloadPlatform iOS
+          # 创建 SDK 目录
+          mkdir -p $HOME/theos/sdks
+          # 下载兼容的 iOS 18.2 SDK（替代官方下载命令）
+          curl -L https://github.com/xybp888/iOS-SDKs/raw/master/iOS_18.2.sdk.tar.xz \
+            -o iOS_18.2.sdk.tar.xz
+          # 解压到 Theos SDK 目录
+          tar -xJf iOS_18.2.sdk.tar.xz -C $HOME/theos/sdks/
+          # 清理压缩包
+          rm iOS_18.2.sdk.tar.xz
+          # 验证 SDK 是否安装成功
+          echo "已安装的 SDK 列表："
+          ls $HOME/theos/sdks/
 
       # 安装 Theos 依赖
       - name: Install dependencies
