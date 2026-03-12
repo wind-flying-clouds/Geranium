@@ -34,19 +34,22 @@ jobs:
           PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
           PLIST_FILE="Geranium/Info.plist"
 
+
+
           # 检查主文件存在性
           if [ ! -f "$PROJECT_FILE" ]; then
             echo "Error: $PROJECT_FILE 不存在！"
             exit 1
           fi
-          # 修复了这里的空格问题
-          if[ ! -f "$PLIST_FILE" ]; then
+          if [ ! -f "$PLIST_FILE" ]; then
             echo "Error: $PLIST_FILE 不存在！"
             exit 1
           fi
 
           # 1. 全局替换旧 Bundle ID（主应用+扩展）
+
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE"
+
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
           echo "已同步修改主应用+扩展的 Bundle ID"
 
@@ -159,6 +162,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
+            PRODUCT_NAME="云踪" \
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
@@ -187,4 +191,3 @@ jobs:
             build/*.ipa
             build/*.tipa
           if-no-files-found: error
-          retention-days: 30
