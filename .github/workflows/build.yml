@@ -103,42 +103,33 @@ jobs:
           git submodule absorbgitdirs
           git config --file .gitmodules submodule.RootHelper.update none
 
-      - name: Select Xcode
+      # 🚨 修复：动态查找并切换可用的 Xcode 版本
+      - name: Select available Xcode version
         run: |
-          # 改用更稳定的 Xcode 15.4 版本（减少 SDK 兼容性问题）
-          sudo xcode-select -switch /Applications/Xcode_15.4.app
-          xcodebuild -version
-
-      # 🚨 最终修复：改用稳定的 SDK 源 + 下载校验 + 降级 Xcode 适配
-      - name: Install iOS SDK (stable source + validation)
-        run: |
-          # 1. 先安装必要的解压工具
-          brew install pixz || true
+          # 列出所有已安装的 Xcode 路径
+          echo "=== 已安装的 Xcode 版本 ==="
+          ls -la /Applications/ | grep Xcode
           
-          # 2. 创建 SDK 目录
-          mkdir -p $HOME/theos/sdks
-          
-          # 3. 下载稳定的 iPhoneOS16.5.sdk（适配 Xcode 15.4，无模拟器依赖）
-          SDK_URL="https://github.com/theos/sdks/releases/download/master/iPhoneOS16.5.sdk.tar.xz"
-          curl -L --fail --show-error $SDK_URL -o iPhoneOS16.5.sdk.tar.xz
-          
-          # 4. 校验文件是否为有效压缩包
-          if ! file iPhoneOS16.5.sdk.tar.xz | grep -q "XZ compressed data"; then
-            echo "Error: 下载的 SDK 文件格式无效！"
-            cat iPhoneOS16.5.sdk.tar.xz  # 打印错误内容排查
+          # 动态选择第一个可用的 Xcode（优先最新版）
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app | head -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "Error: 未找到任何 Xcode 安装路径！"
             exit 1
           fi
+          echo "使用 Xcode 路径：$XCODE_PATH"
           
-          # 5. 解压 SDK（使用 pixz 提高兼容性）
-          tar -xJf iPhoneOS16.5.sdk.tar.xz -C $HOME/theos/sdks/
+          # 切换 Xcode
+          sudo xcode-select -switch "$XCODE_PATH"
           
-          # 6. 清理压缩包
-          rm iPhoneOS16.5.sdk.tar.xz
+          # 验证 Xcode 版本
+          echo "=== Xcode 版本信息 ==="
+          xcodebuild -version
           
-          # 7. 验证 SDK 是否安装成功
-          echo "已安装的 SDK 列表："
-          ls -la $HOME/theos/sdks/
+          # 验证已安装的 SDK
+          echo "=== 已安装的 iOS SDK 列表 ==="
+          xcodebuild -showsdks | grep iphoneos
 
+      # 🚨 移除：不再手动下载 iOS SDK，使用 Xcode 自带的 SDK
       # 安装 Theos 依赖
       - name: Install dependencies
         run: brew install ldid xz
@@ -149,14 +140,15 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      # 直接用指定 release 地址下载 iPhoneOS14.5.sdk
-      - name: Install iPhoneOS 14.5 SDK
+      # 直接用指定 release 地址下载 iPhoneOS14.5.sdk（仅用于 RootHelper 构建）
+      - name: Install iPhoneOS 14.5 SDK for Theos
         run: |
+          mkdir -p $THEOS/sdks
           curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz \
             -o iPhoneOS14.5.sdk.tar.xz
           tar -xJf iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
-          echo "已安装 SDK："
+          echo "已安装 Theos SDK："
           ls $THEOS/sdks/
 
       # 构建 RootHelper
@@ -169,14 +161,18 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名
+      # 构建主应用，不签名（使用 Xcode 自带 SDK，指定兼容版本）
       - name: Build Geranium with Xcode
         run: |
+          # 获取 Xcode 自带的最新 iOS SDK 版本
+          SDK_VERSION=$(xcodebuild -showsdks | grep iphoneos | awk '{print $2}' | sed 's/iphoneos//' | tail -1)
+          echo "使用 iOS SDK 版本：$SDK_VERSION"
+          
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
             -configuration Release \
-            -sdk iphoneos \
+            -sdk iphoneos$SDK_VERSION \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
