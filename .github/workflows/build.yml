@@ -17,17 +17,20 @@ jobs:
           submodules: false      # 不自动拉取子模块
           fetch-depth: 1
 
-      # ✏️ 修改 Bundle ID 和显示名称
+      # ✏️ 修改 Bundle ID 和显示名称（修复 21-33 行）
       - name: Modify bundle ID and display name
         run: |
+          # 1. 修改 xcodeproj 中的 Bundle ID
           sed -i '' \
             's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
             Geranium.xcodeproj/project.pbxproj
 
+          # 2. 修改 Info.plist - CFBundleDisplayName（应用显示名称，纯字符串，不要带 Bundle ID）
           /usr/libexec/PlistBuddy -c \
-            "Set :CFBundleDisplayName com.private.CloudRoam" \
+            "Set :CFBundleDisplayName CloudRoam" \
             Geranium/Info.plist
 
+          # 3. 修改 Info.plist - CFBundleName（应用短名称，建议简洁，如 CloudRoam）
           /usr/libexec/PlistBuddy -c \
             "Set :CFBundleName CloudRoam" \
             Geranium/Info.plist
@@ -83,7 +86,7 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名
+      # 构建主应用，不签名（修复 99-100 行语法错误）
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -95,10 +98,10 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
-            PRODUCT_NAME="CloudRoam"
-            
+            PRODUCT_NAME="CloudRoam"  # 关键：去掉行尾多余换行，参数用 \ 连接
+
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
         run: |
