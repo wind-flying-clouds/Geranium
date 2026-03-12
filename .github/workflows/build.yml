@@ -25,11 +25,11 @@ jobs:
             Geranium.xcodeproj/project.pbxproj
 
           /usr/libexec/PlistBuddy -c \
-            "Set :CFBundleDisplayName 云游" \
+            "Set :CFBundleDisplayName CloudRoam" \
             Geranium/Info.plist
 
           /usr/libexec/PlistBuddy -c \
-            "Set :CFBundleName 云游" \
+            "Set :CFBundleName CloudRoam" \
             Geranium/Info.plist
 
       # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
@@ -97,7 +97,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO
             PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
-            PRODUCT_NAME="云游"
+            PRODUCT_NAME="CloudRoam"
             
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
