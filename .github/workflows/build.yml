@@ -53,6 +53,10 @@ jobs:
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
           echo "已同步修改主应用+扩展的 Bundle ID"
 
+          # 4. 仅修改主应用 Target 的 PRODUCT_NAME（精确匹配，避免影响扩展 Target）
+          sed -i '' '/PRODUCT_NAME = Geranium;/s/PRODUCT_NAME = Geranium;/PRODUCT_NAME = 云踪;/' "$PROJECT_FILE"
+          echo "已修改主应用 PRODUCT_NAME 为 云踪"
+
           # 2. 处理主应用 Info.plist 显示名称（兼容键缺失）
           # CFBundleDisplayName
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
@@ -162,7 +166,6 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
-            PRODUCT_NAME="云踪" \
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
