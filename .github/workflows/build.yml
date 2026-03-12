@@ -17,20 +17,20 @@ jobs:
           submodules: false      # 不自动拉取子模块
           fetch-depth: 1
 
-      # ✏️ 修复：兼容 Info.plist 无 CFBundleDisplayName 键的场景
-      - name: Modify bundle ID and display name
+      # ✏️ 最终修复：全兼容 Info.plist 键缺失场景 + 路径排查
+      - name: Modify main target bundle ID and name
         run: |
-          # 打印当前目录和文件结构（关键：帮你确认文件路径）
+          # 打印目录结构（排查路径）
           echo "=== 当前工作目录 ==="
           pwd
-          echo "=== 目录下的文件/文件夹 ==="
-          ls -la
           echo "=== Geranium 目录下的内容 ==="
           ls -la Geranium/ || echo "Geranium 目录不存在！"
 
-          # 1. 检查关键文件是否存在
+          # 定义文件路径
           PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
           PLIST_FILE="Geranium/Info.plist"
+
+          # 检查文件存在性
           if [ ! -f "$PROJECT_FILE" ]; then
             echo "Error: $PROJECT_FILE 不存在！"
             exit 1
@@ -40,32 +40,26 @@ jobs:
             exit 1
           fi
 
-          # 2. 验证 Info.plist 格式是否合法
-          if ! /usr/libexec/PlistBuddy -c "Print" "$PLIST_FILE" 2>/dev/null; then
-            echo "Error: $PLIST_FILE 不是合法的 plist 文件！"
-            exit 1
-          fi
-
-          # 3. 修改 xcodeproj 中的 Bundle ID
+          # 1. 只修改主 Target (Geranium) 的 Bundle ID（精准匹配，避免影响子 Target）
           sed -i '' \
-            's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
+            '/TargetAttributes = {/,/}/!b; /Geranium/!b; s/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
             "$PROJECT_FILE"
 
-          # 4. 处理 CFBundleDisplayName（兼容不存在的情况）
+          # 2. 处理 Info.plist（主应用的显示名称）
+          # 兼容 CFBundleDisplayName 不存在的情况
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" "$PLIST_FILE"
           else
             /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string CloudRoam" "$PLIST_FILE"
           fi
-
-          # 5. 处理 CFBundleName（核心修复：兼容不存在的情况）
+          # 兼容 CFBundleName 不存在的情况
           if /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleName CloudRoam" "$PLIST_FILE"
           else
             /usr/libexec/PlistBuddy -c "Add :CFBundleName string CloudRoam" "$PLIST_FILE"
           fi
 
-          # 6. 验证修改结果（可选，方便排查）
+          # 验证修改结果
           echo "=== 修改后的 Info.plist 关键内容 ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增"
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增"
@@ -121,7 +115,7 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名（修复 99-100 行语法错误）
+      # 构建主应用，不签名
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -134,25 +128,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
-            PRODUCT_NAME="CloudRoam"  # 关键：去掉行尾多余换行，参数用 \ 连接
+            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam"  # 移除 PRODUCT_NAME 参数
 
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
         run: |
           chmod +x ipabuild.sh
-          # ipabuild.sh 内部会再次 git submodule update，遇到失效 commit 会崩
-          # 用 sed 删掉这一行，因为 RootHelper 我们已经手动 clone 好了
+          # 删掉会导致崩溃的 git submodule update 行
           sed -i '' '/git submodule update/d' ipabuild.sh
           bash ipabuild.sh
 
-      # 将 .tipa 同时复制一份 .ipa 后缀（两者内容完全相同）
+      # 将 .tipa 同时复制一份 .ipa 后缀
       - name: Rename tipa to ipa
         run: |
           find build/ -name "*.tipa" -exec bash -c \
             'cp "$1" "${1%.tipa}.ipa"' _ {} \;
 
-      # 上传产物（修复 Node.js 20 弃用警告：统一用 v4）
+      # 上传产物
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
