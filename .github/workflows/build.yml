@@ -17,6 +17,21 @@ jobs:
           submodules: false      # 不自动拉取子模块
           fetch-depth: 1
 
+      # ✏️ 修改 Bundle ID 和显示名称
+      - name: Modify bundle ID and display name
+        run: |
+          sed -i '' \
+            's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
+            Geranium.xcodeproj/project.pbxproj
+
+          /usr/libexec/PlistBuddy -c \
+            "Set :CFBundleDisplayName 云游" \
+            Geranium/Info.plist
+
+          /usr/libexec/PlistBuddy -c \
+            "Set :CFBundleName 云游" \
+            Geranium/Info.plist
+
       # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
       - name: Clone RootHelper manually
         run: |
@@ -81,8 +96,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO
-            PRODUCT_BUNDLE_IDENTIFIER="com.private.geranium" \
-            PRODUCT_NAME="iGeranium"
+            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
+            PRODUCT_NAME="云游"
             
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
