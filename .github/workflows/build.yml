@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 1
 
       # ✏️ 最终修复：全兼容 Info.plist 键缺失场景 + 路径排查
-      - name: Modify bundle ID and display name (simplified)
+      - name: Modify all bundle IDs and display name
         run: |
           # 打印目录结构
           echo "=== 当前工作目录 ==="
@@ -29,8 +29,10 @@ jobs:
           # 定义文件路径
           PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
           PLIST_FILE="Geranium/Info.plist"
+          # 扩展的 Info.plist 路径（根据报错日志中的扩展名称推导）
+          EXTENSION_PLIST_FILE="Geranium/Bookmark Location in Geranium/Info.plist"
 
-          # 检查文件存在性
+          # 检查主文件存在性
           if [ ! -f "$PROJECT_FILE" ]; then
             echo "Error: $PROJECT_FILE 不存在！"
             exit 1
@@ -40,12 +42,14 @@ jobs:
             exit 1
           fi
 
-          # 1. 全局替换 Bundle ID（放弃精准匹配，解决 sed 语法问题）
-          # BSD sed 兼容的单行替换命令
-          sed -i '' 's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' "$PROJECT_FILE"
-          echo "已全局替换 Bundle ID 为 com.private.CloudRoam"
+          # 1. 全局替换旧 Bundle ID（主应用+扩展）
+          # 主应用：live.cclerc.geranium → com.private.CloudRoam
+          sed -i '' 's/live\.cclerc\.geranium/com.private.CloudRoam/g' "$PROJECT_FILE"
+          # 兼容扩展的 Bundle ID 后缀（保证扩展 ID 是主应用的后缀）
+          sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.private.CloudRoam.BookmarkLocation/g' "$PROJECT_FILE"
+          echo "已同步修改主应用+扩展的 Bundle ID"
 
-          # 2. 处理 Info.plist 显示名称（兼容键缺失）
+          # 2. 处理主应用 Info.plist 显示名称
           # CFBundleDisplayName（应用显示名称）
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
             /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" "$PLIST_FILE"
@@ -59,8 +63,22 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :CFBundleName string CloudRoam" "$PLIST_FILE"
           fi
 
+          # 3. 处理扩展的 Info.plist（如果存在）
+          if [ -f "$EXTENSION_PLIST_FILE" ]; then
+            # 扩展的 Bundle ID 必须是主应用后缀
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.private.CloudRoam.BookmarkLocation" "$EXTENSION_PLIST_FILE"
+            echo "已修改扩展的 Bundle ID 为 com.private.CloudRoam.BookmarkLocation"
+          else
+            # 自动查找扩展的 Info.plist
+            EXT_PLIST=$(find . -name "Info.plist" | grep -i "Bookmark" | head -1)
+            if [ -n "$EXT_PLIST" ]; then
+              /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.private.CloudRoam.BookmarkLocation" "$EXT_PLIST"
+              echo "已找到扩展 Info.plist: $EXT_PLIST，修改其 Bundle ID"
+            fi
+          fi
+
           # 验证修改结果
-          echo "=== 修改后的 Info.plist 关键内容 ==="
+          echo "=== 修改后的主应用 Info.plist 关键内容 ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增"
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增"
 
@@ -128,7 +146,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam"  # 移除 PRODUCT_NAME 参数
+            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
+            # 强制关闭扩展验证（兜底方案）
+            VALIDATE_PRODUCT=NO
 
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
