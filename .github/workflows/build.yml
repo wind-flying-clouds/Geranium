@@ -1,4 +1,4 @@
-name: Build Geranium IPA (终极救命版 - 桌面名称=云踪)
+name: Build Geranium IPA (兼容所有系统 - 桌面名称=云踪)
 
 on:
   workflow_dispatch:
@@ -17,64 +17,51 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: 🔥 核心修复：兼容 plist 字段不存在的情况
+      - name: 🔥 终极兼容：适配所有 plutil 版本
         run: |
-          # ====================== 1. 主应用 Info.plist 安全修改 ======================
+          # ====================== 1. 主应用 Info.plist 兼容修改（核心） ======================
           MAIN_PLIST="Geranium/Info.plist"
           
-          # 🔑 关键：先判断字段是否存在，不存在就直接添加，不执行 remove
-          # 设置 CFBundleIdentifier（核心）
-          if plutil -extract CFBundleIdentifier raw "$MAIN_PLIST" 2>/dev/null; then
-            plutil -replace CFBundleIdentifier -string "com.cloud.trail" "$MAIN_PLIST"
-          else
-            plutil -add CFBundleIdentifier -string "com.cloud.trail" "$MAIN_PLIST"
-          fi
+          # 🔑 关键：只用 -replace（旧版 plutil 兼容），不存在的字段会自动添加
+          # 设置 Bundle ID（核心）
+          plutil -replace CFBundleIdentifier -string "com.cloud.trail" "$MAIN_PLIST"
+          # 设置桌面显示名称
+          plutil -replace CFBundleDisplayName -string "云踪" "$MAIN_PLIST"
+          # 设置 Bundle 名称（兜底）
+          plutil -replace CFBundleName -string "云踪" "$MAIN_PLIST"
           
-          # 设置 CFBundleDisplayName（桌面显示名称）
-          if plutil -extract CFBundleDisplayName raw "$MAIN_PLIST" 2>/dev/null; then
-            plutil -replace CFBundleDisplayName -string "云踪" "$MAIN_PLIST"
-          else
-            plutil -add CFBundleDisplayName -string "云踪" "$MAIN_PLIST"
-          fi
-          
-          # 设置 CFBundleName（bundle 名称，兜底）
-          if plutil -extract CFBundleName raw "$MAIN_PLIST" 2>/dev/null; then
-            plutil -replace CFBundleName -string "云踪" "$MAIN_PLIST"
-          else
-            plutil -add CFBundleName -string "云踪" "$MAIN_PLIST"
-          fi
-          
-          # 验证修改结果
+          # 验证修改结果（兼容字段不存在的情况）
           echo "✅ 主应用 Info.plist 修改后内容："
-          plutil -p "$MAIN_PLIST" | grep -E "CFBundleDisplayName|CFBundleName|CFBundleIdentifier" || echo "字段已添加"
+          plutil -p "$MAIN_PLIST" | grep -E "CFBundleDisplayName|CFBundleName|CFBundleIdentifier" || echo "字段已成功添加"
           
           # ====================== 2. 扩展配置（避免重名） ======================
           EXT_PLIST=$(find . -name "Info.plist" | grep "Bookmark Location in Geranium" | head -1)
           if [ -f "$EXT_PLIST" ]; then
-            # 扩展字段也用安全修改方式
-            plutil -replace CFBundleIdentifier -string "com.cloud.trail.BookmarkExtension" "$EXT_PLIST" 2>/dev/null || plutil -add CFBundleIdentifier -string "com.cloud.trail.BookmarkExtension" "$EXT_PLIST"
-            plutil -replace CFBundleName -string "YunZongBookmarkExtension" "$EXT_PLIST" 2>/dev/null || plutil -add CFBundleName -string "YunZongBookmarkExtension" "$EXT_PLIST"
-            plutil -replace CFBundleDisplayName -string "云踪-书签扩展" "$EXT_PLIST" 2>/dev/null || plutil -add CFBundleDisplayName -string "云踪-书签扩展" "$EXT_PLIST"
+            # 扩展也只用 -replace 兼容
+            plutil -replace CFBundleIdentifier -string "com.cloud.trail.BookmarkExtension" "$EXT_PLIST"
+            plutil -replace CFBundleName -string "YunZongBookmarkExtension" "$EXT_PLIST"
+            plutil -replace CFBundleDisplayName -string "云踪-书签扩展" "$EXT_PLIST"
           fi
           
           # ====================== 3. Xcode 项目配置（防止编译覆盖） ======================
           PROJ_FILE="Geranium.xcodeproj/project.pbxproj"
           
-          # 3.1 主应用：强制 PRODUCT_NAME/MODULE_NAME 为 云踪
-          sed -i '' '/Geranium.*PRODUCT_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE" 2>/dev/null || echo "PRODUCT_NAME 字段已添加"
-          sed -i '' '/Geranium.*MODULE_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE" 2>/dev/null || echo "MODULE_NAME 字段已添加"
+          # 3.1 主应用：强制 PRODUCT_NAME/MODULE_NAME 为 云踪（容错）
+          sed -i '' '/Geranium.*PRODUCT_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE" 2>/dev/null
+          sed -i '' '/Geranium.*MODULE_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE" 2>/dev/null
           
-          # 3.2 禁用 Info.plist 预处理（不存在则添加）
-          if ! grep -q "INFOPLIST_PREPROCESS" "$PROJ_FILE"; then
-            # 找到主应用的 buildSettings 段，添加 INFOPLIST_PREPROCESS = NO;
-            sed -i '' '/Geranium.*buildSettings/ a \ \ \ \ INFOPLIST_PREPROCESS = NO;' "$PROJ_FILE"
-          else
+          # 3.2 禁用 Info.plist 预处理（兼容字段不存在）
+          if grep -q "INFOPLIST_PREPROCESS" "$PROJ_FILE"; then
             sed -i '' '/INFOPLIST_PREPROCESS/ s/=.*/= NO;/' "$PROJ_FILE"
+          else
+            # 找到主应用 buildSettings 并添加（兼容写法）
+            awk '/Geranium.*buildSettings/ {print; print "    INFOPLIST_PREPROCESS = NO;"; next}1' "$PROJ_FILE" > temp.pbxproj
+            mv temp.pbxproj "$PROJ_FILE"
           fi
           
-          # 3.3 扩展：纯英文名称
-          sed -i '' '/Bookmark Location in Geranium.*PRODUCT_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE" 2>/dev/null || echo "扩展 PRODUCT_NAME 已添加"
-          sed -i '' '/Bookmark Location in Geranium.*MODULE_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE" 2>/dev/null || echo "扩展 MODULE_NAME 已添加"
+          # 3.3 扩展：纯英文名称（容错）
+          sed -i '' '/Bookmark Location in Geranium.*PRODUCT_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE" 2>/dev/null
+          sed -i '' '/Bookmark Location in Geranium.*MODULE_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE" 2>/dev/null
           
           # 3.4 替换旧 Bundle ID + 兼容 SDK
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJ_FILE"
@@ -84,7 +71,7 @@ jobs:
       - name: 🔧 安装基础依赖
         run: brew install ldid xz || true
 
-      - name: 📱 构建 Geranium
+      - name: 📱 构建 Geranium（适配 iOS 18.5）
         run: |
           xcodebuild \
             -project Geranium.xcodeproj \
@@ -97,36 +84,39 @@ jobs:
             ENABLE_PREVIEWS=NO \
             ONLY_ACTIVE_ARCH=NO \
             BUILD_DIR=./build \
+            # 强制传递显示名称（兜底）
             INFOPLIST_KEY_CFBundleDisplayName="云踪" \
             INFOPLIST_KEY_CFBundleName="云踪" \
             INFOPLIST_KEY_CFBundleIdentifier="com.cloud.trail"
 
-      - name: 📦 打包 IPA + 验证名称
+      - name: 📦 打包 IPA + 最终验证
         run: |
+          # 查找构建好的 app
           APP_PATH=$(find ./build/Release-iphoneos -name "Geranium.app" -type d -print -quit)
           if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到 Geranium.app"
+            echo "❌ 未找到 Geranium.app，打印目录："
             ls -la ./build/Release-iphoneos/
             exit 1
           fi
           
-          # 验证 app 内的显示名称
-          echo "✅ 最终验证 - app 内 Info.plist："
+          # 验证 app 内的显示名称（最终确认）
+          echo "✅ 最终验证 - 打包后 app 内 Info.plist："
           plutil -p "$APP_PATH/Info.plist" | grep -E "CFBundleDisplayName|CFBundleName|CFBundleIdentifier"
           
-          # 打包 IPA
+          # 打包 IPA（标准格式）
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r Geranium-云踪_最终可用版.ipa Payload/
+          zip -r Geranium-云踪_最终最终版.ipa Payload/
           rm -rf Payload
           
+          # 移动到 build 目录
           mkdir -p build
-          mv Geranium-云踪_最终可用版.ipa build/
-          echo "✅ IPA 生成成功！桌面名称已设为「云踪」"
+          mv Geranium-云踪_最终最终版.ipa build/
+          echo "🎉 IPA 生成成功！桌面显示名称为「云踪」，Bundle ID 为 com.cloud.trail"
 
-      - name: 📤 上传 IPA
+      - name: 📤 上传 IPA 产物
         uses: actions/upload-artifact@v4
         with:
-          name: Geranium-IPA-云踪-最终版
+          name: Geranium-IPA-云踪-最终可用版
           path: build/*.ipa
           if-no-files-found: warn
