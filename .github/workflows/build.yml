@@ -105,24 +105,39 @@ jobs:
 
       - name: Select Xcode
         run: |
-          sudo xcode-select -switch /Applications/Xcode_16.2.app
+          # 改用更稳定的 Xcode 15.4 版本（减少 SDK 兼容性问题）
+          sudo xcode-select -switch /Applications/Xcode_15.4.app
           xcodebuild -version
 
-      # 🚨 修复：替换原 iOS 平台安装命令，避免模拟器依赖
-      - name: Install iOS SDK (no simulator required)
+      # 🚨 最终修复：改用稳定的 SDK 源 + 下载校验 + 降级 Xcode 适配
+      - name: Install iOS SDK (stable source + validation)
         run: |
-          # 创建 SDK 目录
+          # 1. 先安装必要的解压工具
+          brew install pixz || true
+          
+          # 2. 创建 SDK 目录
           mkdir -p $HOME/theos/sdks
-          # 下载兼容的 iOS 18.2 SDK（替代官方下载命令）
-          curl -L https://github.com/xybp888/iOS-SDKs/raw/master/iOS_18.2.sdk.tar.xz \
-            -o iOS_18.2.sdk.tar.xz
-          # 解压到 Theos SDK 目录
-          tar -xJf iOS_18.2.sdk.tar.xz -C $HOME/theos/sdks/
-          # 清理压缩包
-          rm iOS_18.2.sdk.tar.xz
-          # 验证 SDK 是否安装成功
+          
+          # 3. 下载稳定的 iPhoneOS16.5.sdk（适配 Xcode 15.4，无模拟器依赖）
+          SDK_URL="https://github.com/theos/sdks/releases/download/master/iPhoneOS16.5.sdk.tar.xz"
+          curl -L --fail --show-error $SDK_URL -o iPhoneOS16.5.sdk.tar.xz
+          
+          # 4. 校验文件是否为有效压缩包
+          if ! file iPhoneOS16.5.sdk.tar.xz | grep -q "XZ compressed data"; then
+            echo "Error: 下载的 SDK 文件格式无效！"
+            cat iPhoneOS16.5.sdk.tar.xz  # 打印错误内容排查
+            exit 1
+          fi
+          
+          # 5. 解压 SDK（使用 pixz 提高兼容性）
+          tar -xJf iPhoneOS16.5.sdk.tar.xz -C $HOME/theos/sdks/
+          
+          # 6. 清理压缩包
+          rm iPhoneOS16.5.sdk.tar.xz
+          
+          # 7. 验证 SDK 是否安装成功
           echo "已安装的 SDK 列表："
-          ls $HOME/theos/sdks/
+          ls -la $HOME/theos/sdks/
 
       # 安装 Theos 依赖
       - name: Install dependencies
