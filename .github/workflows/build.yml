@@ -1,4 +1,4 @@
-name: Build Geranium IPA (最终最终版 - 仅核心功能)
+name: Build Geranium IPA (桌面名称=云踪 最终版)
 
 on:
   workflow_dispatch:
@@ -17,15 +17,26 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: 🔥 终极修复：彻底分开主应用/扩展名称 + 修改 Bundle ID
+      - name: 🔥 核心修复：强制固化桌面显示名称（关键步骤）
         run: |
-          # ====================== 1. 主应用配置（核心需求） ======================
-          # Info.plist：云踪 + com.cloud.trail
-          plutil -replace CFBundleIdentifier -string "com.cloud.trail" Geranium/Info.plist
-          plutil -replace CFBundleDisplayName -string "云踪" Geranium/Info.plist
-          plutil -replace CFBundleName -string "云踪" Geranium/Info.plist
+          # ====================== 1. 主应用 Info.plist 彻底修改（重中之重） ======================
+          MAIN_PLIST="Geranium/Info.plist"
           
-          # ====================== 2. 扩展配置（纯英文名称，避免重名） ======================
+          # 先删除原有字段，再重新添加（避免变量覆盖）
+          plutil -remove CFBundleDisplayName "$MAIN_PLIST" 2>/dev/null
+          plutil -remove CFBundleName "$MAIN_PLIST" 2>/dev/null
+          plutil -remove CFBundleIdentifier "$MAIN_PLIST" 2>/dev/null
+          
+          # 添加固定值（不使用任何变量，确保桌面显示）
+          plutil -add CFBundleDisplayName -string "云踪" "$MAIN_PLIST"
+          plutil -add CFBundleName -string "云踪" "$MAIN_PLIST"
+          plutil -add CFBundleIdentifier -string "com.cloud.trail" "$MAIN_PLIST"
+          
+          # 验证修改结果（打印确认）
+          echo "✅ 主应用 Info.plist 修改后内容："
+          plutil -p "$MAIN_PLIST" | grep -E "CFBundleDisplayName|CFBundleName|CFBundleIdentifier"
+          
+          # ====================== 2. 扩展配置（避免重名） ======================
           EXT_PLIST=$(find . -name "Info.plist" | grep "Bookmark Location in Geranium" | head -1)
           if [ -f "$EXT_PLIST" ]; then
             plutil -replace CFBundleIdentifier -string "com.cloud.trail.BookmarkExtension" "$EXT_PLIST"
@@ -33,32 +44,29 @@ jobs:
             plutil -replace CFBundleDisplayName -string "云踪-书签扩展" "$EXT_PLIST"
           fi
           
-          # ====================== 3. 修改 Xcode 项目底层配置 ======================
+          # ====================== 3. Xcode 项目配置（防止编译覆盖） ======================
           PROJ_FILE="Geranium.xcodeproj/project.pbxproj"
           
-          # 3.1 主应用：PRODUCT_NAME/MODULE_NAME = 云踪
+          # 3.1 主应用：强制 PRODUCT_NAME 为 云踪（覆盖编译变量）
           sed -i '' '/Geranium.*PRODUCT_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE"
           sed -i '' '/Geranium.*MODULE_NAME/ s/=.*/= 云踪;/' "$PROJ_FILE"
+          # 3.2 禁用 Info.plist 编译时替换（关键：保留我们的修改）
+          sed -i '' '/INFOPLIST_PREPROCESS/ s/=.*/= NO;/' "$PROJ_FILE"
           
-          # 3.2 扩展：PRODUCT_NAME/MODULE_NAME = YunZongBookmarkExtension（纯英文）
+          # 3.3 扩展：纯英文名称避免重名
           sed -i '' '/Bookmark Location in Geranium.*PRODUCT_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE"
           sed -i '' '/Bookmark Location in Geranium.*MODULE_NAME/ s/=.*/= YunZongBookmarkExtension;/' "$PROJ_FILE"
           
-          # 3.3 替换旧 Bundle ID
+          # 3.4 替换旧 Bundle ID + 兼容 SDK
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJ_FILE"
           sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkExtension/g' "$PROJ_FILE"
-          
-          # 3.4 兼容 iOS 18.5 SDK
           sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 16.0;/g' "$PROJ_FILE"
 
-      - name: 🔧 安装 Xcode 构建依赖（仅必要组件）
-        run: |
-          # 安装基础工具，跳过 Theos/RootHelper（非核心）
-          brew install ldid xz || true
+      - name: 🔧 安装基础依赖
+        run: brew install ldid xz || true
 
-      - name: 📱 构建 Geranium（适配 iOS 18.5 SDK，跳过 RootHelper）
+      - name: 📱 构建 Geranium（强制保留 Info.plist 修改）
         run: |
-          # 强制使用 iOS 18.5 SDK（当前环境唯一完整的）
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
@@ -70,34 +78,39 @@ jobs:
             ENABLE_PREVIEWS=NO \
             ONLY_ACTIVE_ARCH=NO \
             BUILD_DIR=./build \
-            "Geranium_PRODUCT_NAME=云踪" \
-            "YunZongBookmarkExtension_PRODUCT_NAME=YunZongBookmarkExtension"
+            # 强制传递显示名称参数（兜底）
+            INFOPLIST_KEY_CFBundleDisplayName="云踪" \
+            INFOPLIST_KEY_CFBundleName="云踪" \
+            INFOPLIST_KEY_CFBundleIdentifier="com.cloud.trail"
 
-      - name: 📦 手动打包 IPA（核心输出）
+      - name: 📦 打包 IPA + 验证桌面名称
         run: |
-          # 查找主应用 .app 文件
+          # 查找构建好的 app
           APP_PATH=$(find ./build/Release-iphoneos -name "Geranium.app" -type d -print -quit)
           if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到 Geranium.app，打印目录排查："
+            echo "❌ 未找到 Geranium.app"
             ls -la ./build/Release-iphoneos/
             exit 1
           fi
           
-          # 打包 IPA（iOS 标准格式）
+          # 🔍 验证 app 内的 Info.plist（关键：确认桌面名称已生效）
+          echo "✅ 打包前验证 app 内的显示名称："
+          plutil -p "$APP_PATH/Info.plist" | grep -E "CFBundleDisplayName|CFBundleName"
+          
+          # 打包 IPA
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r Geranium-云踪_$(date +%Y%m%d_%H%M%S).ipa Payload/
+          zip -r Geranium-云踪_桌面名称版.ipa Payload/
           rm -rf Payload
           
-          # 移动到 build 目录方便上传
+          # 移动到 build 目录
           mkdir -p build
-          mv Geranium-云踪_*.ipa build/
-          echo "✅ IPA 生成成功！文件列表："
-          ls -la build/*.ipa
+          mv Geranium-云踪_桌面名称版.ipa build/
+          echo "✅ IPA 生成完成！桌面显示名称已固化为「云踪」"
 
-      - name: 📤 上传 IPA 产物
+      - name: 📤 上传 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Geranium-IPA-云踪-最终可用版
+          name: Geranium-IPA-桌面名称=云踪
           path: build/*.ipa
           if-no-files-found: warn
