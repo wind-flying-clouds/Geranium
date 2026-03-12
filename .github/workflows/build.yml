@@ -14,7 +14,6 @@ jobs:
       APP_BUNDLE_NAME: "CloudTrail"
       XCODE_PATH: "/Applications/Xcode_16.2.app"
       THEOS_PATH: "$HOME/theos"
-      # 新增：强制指定Theos架构/平台，避免路径推导错误
       THEOS_PLATFORM: iphone
       THEOS_ARCH: arm64
       THEOS_DEVICE_IP: localhost
@@ -35,8 +34,9 @@ jobs:
           [ ! -f "$PBX_PROJ" ] && echo "❌ 错误：$PBX_PROJ 不存在" && exit 1
           [ ! -f "$MAIN_PLIST" ] && echo "❌ 错误：$MAIN_PLIST 不存在" && exit 1
 
-          sed -i '' 's/live\.cclerc\.geranium/'"${MAIN_BUNDLE_ID}"'/g' "$PBX_PROJ"
-          sed -i '' 's/'"${MAIN_BUNDLE_ID}"'\.Bookmark-Location-in-Geranium/'"${EXT_BUNDLE_ID}"'/g' "$PBX_PROJ"
+          # 修复：使用sed绝对路径，避免PATH异常
+          /usr/bin/sed -i '' 's/live\.cclerc\.geranium/'"${MAIN_BUNDLE_ID}"'/g' "$PBX_PROJ"
+          /usr/bin/sed -i '' 's/'"${MAIN_BUNDLE_ID}"'\.Bookmark-Location-in-Geranium/'"${EXT_BUNDLE_ID}"'/g' "$PBX_PROJ"
           echo "✅ 已替换Bundle ID：主应用=$MAIN_BUNDLE_ID | 扩展=$EXT_BUNDLE_ID"
 
           plistbuddy() { /usr/libexec/PlistBuddy -c "$1" "$MAIN_PLIST" 2>/dev/null; }
@@ -90,10 +90,9 @@ jobs:
         run: |
           rm -rf "${THEOS_PATH}" || true
           git clone --recursive --depth 1 https://github.com/theos/theos.git "${THEOS_PATH}"
-          # 关键修复：将Theos路径写入全局环境变量，确保make能找到
           echo "export THEOS=${THEOS_PATH}" >> ~/.bash_profile
           echo "export PATH=\$THEOS/bin:\$PATH" >> ~/.bash_profile
-          source ~/.bash_profile # 立即生效环境变量
+          source ~/.bash_profile
           echo "THEOS=${THEOS_PATH}" >> $GITHUB_ENV
           echo "✅ Theos安装完成：路径=${THEOS_PATH}，环境变量已生效"
 
@@ -108,11 +107,12 @@ jobs:
           rm -rf ${SDK_TAR}
           echo "✅ iPhoneOS14.5 SDK安装完成：$SDK_DIR"
 
-      # 核心修复：RootHelper构建时强制指定Theos路径，解决make找不到配置文件的问题
-      - name: Build RootHelper (fix Theos path)
+      # 核心修复：RootHelper构建步骤（解决sed找不到+PATH覆盖问题）
+      - name: Build RootHelper (fix Theos path & sed command)
         run: |
           cd RootHelper
-          sed -i '' 's/^Package:.*/Package: geraniumroothelper/' control
+          # 修复1：使用sed绝对路径，不受PATH影响
+          /usr/bin/sed -i '' 's/^Package:.*/Package: geraniumroothelper/' control
           # 强制传递Theos路径给make，覆盖所有推导错误
           make package FINALPACKAGE=1 -s \
             THEOS="${THEOS_PATH}" \
@@ -120,8 +120,11 @@ jobs:
             PATH="${THEOS_PATH}/bin:$PATH"
           echo "✅ RootHelper构建完成（Theos路径已强制指定）"
         env:
-          THEOS: ${{ env.THEOS_PATH }} # 再次显式传递，双重保障
-          PATH: "${{ env.THEOS_PATH }}/bin:$PATH"
+          THEOS: ${{ env.THEOS_PATH }}
+          # 修复2：保留系统默认PATH，仅追加Theos路径（关键！）
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin:${{ env.THEOS_PATH }}/bin:$PATH"
+        # 修复3：显式指定bash shell，确保环境一致
+        shell: /bin/bash -e {0}
 
       - name: Build Geranium with Xcode (optimized for Xcode16.2)
         run: |
@@ -145,13 +148,14 @@ jobs:
             SKIP_INSTALL=NO \
             ONLY_ACTIVE_ARCH=NO \
             BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-            GCC_OPTIMIZATION_LEVEL=s \
+            GCC_OPTIMIZATION_LEVEL=s
           echo "✅ Xcodebuild编译完成，产物路径：${BUILD_DIR}"
 
       - name: Run ipabuild.sh (with fix)
         run: |
           chmod +x ipabuild.sh || true
-          sed -i '' '/git submodule update/d' ipabuild.sh
+          # 修复：sed改用绝对路径
+          /usr/bin/sed -i '' '/git submodule update/d' ipabuild.sh
           bash ipabuild.sh > /dev/null 2>&1
           echo "✅ ipabuild.sh打包完成，生成.tipa文件"
 
