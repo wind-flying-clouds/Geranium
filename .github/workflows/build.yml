@@ -1,6 +1,6 @@
 name: Build CloudTrail IPA
 on:
-  workflow_dispatch: # 手动触发优先，避免push自动构建冲突
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -8,51 +8,46 @@ jobs:
   build:
     runs-on: macos-latest
     env:
-      # 全局参数集中配置，后续修改仅改这里，无需动脚本
       MAIN_BUNDLE_ID: "com.cloud.trail"
       EXT_BUNDLE_ID: "com.cloud.trail.BookmarkLocation"
       APP_DISPLAY_NAME: "云踪"
       APP_BUNDLE_NAME: "CloudTrail"
       XCODE_PATH: "/Applications/Xcode_16.2.app"
       THEOS_PATH: "$HOME/theos"
+      # 新增：强制指定Theos架构/平台，避免路径推导错误
+      THEOS_PLATFORM: iphone
+      THEOS_ARCH: arm64
+      THEOS_DEVICE_IP: localhost
+      THEOS_DEVICE_PORT: 22
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: false
           fetch-depth: 1
-          clean: true # 清理工作区冗余文件，避免编译缓存冲突
+          clean: true
 
-      # 核心：精准修改ID+名称，增加日志+强容错，无冗余操作
       - name: Modify bundle ID & app info (stable)
         run: |
-          set -e # 出错立即终止，避免后续无效执行
-          # 定义文件路径
+          set -e
           PBX_PROJ="Geranium.xcodeproj/project.pbxproj"
           MAIN_PLIST="Geranium/Info.plist"
-          # 前置检查关键文件，缺失直接报错提示
           [ ! -f "$PBX_PROJ" ] && echo "❌ 错误：$PBX_PROJ 不存在" && exit 1
           [ ! -f "$MAIN_PLIST" ] && echo "❌ 错误：$MAIN_PLIST 不存在" && exit 1
 
-          # 1. 全局替换Bundle ID（主应用+扩展），解决ID不匹配
           sed -i '' 's/live\.cclerc\.geranium/'"${MAIN_BUNDLE_ID}"'/g' "$PBX_PROJ"
           sed -i '' 's/'"${MAIN_BUNDLE_ID}"'\.Bookmark-Location-in-Geranium/'"${EXT_BUNDLE_ID}"'/g' "$PBX_PROJ"
           echo "✅ 已替换Bundle ID：主应用=$MAIN_BUNDLE_ID | 扩展=$EXT_BUNDLE_ID"
 
-          # 2. 配置主应用Info.plist（兼容键缺失，三键全保障）
           plistbuddy() { /usr/libexec/PlistBuddy -c "$1" "$MAIN_PLIST" 2>/dev/null; }
-          # CFBundleIdentifier：强制补全，避免为空（致命问题）
           plistbuddy "Print :CFBundleIdentifier" || plistbuddy "Add :CFBundleIdentifier string ${MAIN_BUNDLE_ID}"
           plistbuddy "Set :CFBundleIdentifier ${MAIN_BUNDLE_ID}"
-          # CFBundleDisplayName：桌面显示名称「云踪」
           plistbuddy "Print :CFBundleDisplayName" || plistbuddy "Add :CFBundleDisplayName string ${APP_DISPLAY_NAME}"
           plistbuddy "Set :CFBundleDisplayName ${APP_DISPLAY_NAME}"
-          # CFBundleName：应用短名称「CloudTrail」
           plistbuddy "Print :CFBundleName" || plistbuddy "Add :CFBundleName string ${APP_BUNDLE_NAME}"
           plistbuddy "Set :CFBundleName ${APP_BUNDLE_NAME}"
           echo "✅ 已配置Info.plist：显示名=$APP_DISPLAY_NAME | 短名称=$APP_BUNDLE_NAME"
 
-          # 3. 适配扩展Info.plist（自动查找+容错，不中断构建）
           EXT_PLIST=$(find . -name "Info.plist" | grep -i "Bookmark" | grep -v "Preview" | head -1)
           if [ -n "$EXT_PLIST" ] && [ -f "$EXT_PLIST" ]; then
             plistbuddy_ext() { /usr/libexec/PlistBuddy -c "$1" "$EXT_PLIST" 2>/dev/null; }
@@ -63,88 +58,76 @@ jobs:
             echo "ℹ️ 未检测到有效扩展Info.plist，跳过扩展配置"
           fi
 
-      # 还原成功流程：克隆RootHelper，增加清理+重试，避免克隆失败
       - name: Clone RootHelper manually (with retry)
         run: |
-          # 强制清理旧目录，避免残留冲突
           rm -rf RootHelper || true
-          # 克隆增加重试，规避GitHub网络偶发波动
           for i in {1..3}; do
             git clone --depth 1 https://github.com/c22dev/Geranium-RH.git RootHelper && break
             echo "ℹ️ 克隆失败，第$i次重试..."
             sleep 2
           done
-          # 配置git子模块，绕开失效commit锁定
           git config submodule.RootHelper.url https://github.com/c22dev/Geranium-RH.git
           git submodule absorbgitdirs
           git config --file .gitmodules submodule.RootHelper.update none
           echo "✅ RootHelper克隆配置完成"
 
-      # Xcode环境配置：精简+稳定，规避模拟器/平台下载报错
       - name: Select Xcode & verify env (stable)
         run: |
-          # 强制切换Xcode，避免环境默认值冲突
           sudo xcode-select -switch "${XCODE_PATH}"
-          # 关闭模拟器服务，彻底规避模拟器连接报错
           sudo killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
-          # 验证Xcode+SDK，打印关键信息用于排查
           echo "📌 Xcode版本：$(xcodebuild -version | head -1)"
           echo "📌 已安装iOS SDK：$(xcodebuild -showsdks | grep iphoneos | awk '{print $NF}')"
           echo "✅ Xcode环境配置完成"
 
-      # 依赖安装：精简+更新，避免brew缓存冲突
       - name: Install dependencies (ldid + xz)
         run: |
-          brew update --quiet # 静默更新brew，避免冗余日志
-          brew install ldid xz --quiet # 静默安装，提升构建速度
-          brew cleanup --quiet # 清理brew缓存，节省工作区空间
+          brew update --quiet
+          brew install ldid xz --quiet
+          brew cleanup --quiet
           echo "✅ 依赖安装完成"
 
-      # Theos安装：精简+深度1，提升克隆速度
       - name: Install Theos (fast)
         run: |
           rm -rf "${THEOS_PATH}" || true
           git clone --recursive --depth 1 https://github.com/theos/theos.git "${THEOS_PATH}"
+          # 关键修复：将Theos路径写入全局环境变量，确保make能找到
+          echo "export THEOS=${THEOS_PATH}" >> ~/.bash_profile
+          echo "export PATH=\$THEOS/bin:\$PATH" >> ~/.bash_profile
+          source ~/.bash_profile # 立即生效环境变量
           echo "THEOS=${THEOS_PATH}" >> $GITHUB_ENV
-          echo "✅ Theos安装完成：路径=${THEOS_PATH}"
+          echo "✅ Theos安装完成：路径=${THEOS_PATH}，环境变量已生效"
 
-      # SDK安装：增加校验+清理，避免解压损坏/冗余
       - name: Install iPhoneOS 14.5 SDK (with check)
         run: |
           SDK_TAR="iPhoneOS14.5.sdk.tar.xz"
           SDK_DIR="${THEOS_PATH}/sdks/iPhoneOS14.5.sdk"
-          # 已安装则跳过，提升二次构建速度
           [ -d "$SDK_DIR" ] && echo "ℹ️ SDK已安装，跳过下载" && exit 0
-          # 下载SDK，增加-L跟随重定向，规避链接失效
           curl -L --silent --show-error https://github.com/theos/sdks/releases/download/master-146e41f/${SDK_TAR} -o ${SDK_TAR}
-          # 解压SDK到Theos目录
           tar -xJf ${SDK_TAR} -C "${THEOS_PATH}/sdks/"
-          # 校验解压结果，缺失则报错
           [ ! -d "$SDK_DIR" ] && echo "❌ SDK解压失败" && exit 1
-          # 清理压缩包，节省空间
           rm -rf ${SDK_TAR}
           echo "✅ iPhoneOS14.5 SDK安装完成：$SDK_DIR"
 
-      # 构建RootHelper：精简+静默，提升速度
-      - name: Build RootHelper (silent)
+      # 核心修复：RootHelper构建时强制指定Theos路径，解决make找不到配置文件的问题
+      - name: Build RootHelper (fix Theos path)
         run: |
           cd RootHelper
-          # 强制修改包名小写，避免Theos构建报错
           sed -i '' 's/^Package:.*/Package: geraniumroothelper/' control
-          # 静默构建，仅输出错误，减少日志冗余
-          make package FINALPACKAGE=1 -s
-          echo "✅ RootHelper构建完成"
+          # 强制传递Theos路径给make，覆盖所有推导错误
+          make package FINALPACKAGE=1 -s \
+            THEOS="${THEOS_PATH}" \
+            THEOS_MAKE_PATH="${THEOS_PATH}/makefiles" \
+            PATH="${THEOS_PATH}/bin:$PATH"
+          echo "✅ RootHelper构建完成（Theos路径已强制指定）"
         env:
-          THEOS: ${{ env.THEOS }}
+          THEOS: ${{ env.THEOS_PATH }} # 再次显式传递，双重保障
+          PATH: "${{ env.THEOS_PATH }}/bin:$PATH"
 
-      # 核心构建：Xcodebuild极致调优，解决exit code 65，适配Xcode16.2
       - name: Build Geranium with Xcode (optimized for Xcode16.2)
         run: |
           set -e
-          # 定义编译输出目录，提前创建避免缺失
           BUILD_DIR="build/DerivedData"
           mkdir -p ${BUILD_DIR} || true
-          # Xcodebuild核心指令：稳定+精简+关闭所有无用校验
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
@@ -152,52 +135,45 @@ jobs:
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -derivedDataPath ${BUILD_DIR} \
-            -quiet \ # 静默编译，仅输出错误，提升速度
+            -quiet \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER="${MAIN_BUNDLE_ID}" \ # 强制赋值，避免为空（致命修复）
-            VALIDATE_PRODUCT=NO \ # 关闭产物校验，解决扩展ID/签名校验报错
-            ENABLE_STRICT_EXTENSION_SIGNING=NO \ # 关闭扩展严格签名校验
-            SKIP_INSTALL=NO \ # 强制保留安装产物，避免ipa打包缺失
-            ONLY_ACTIVE_ARCH=NO \ # 编译所有架构，适配全机型
-            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \ # 修复Xcode16.2库分发兼容问题
-            GCC_OPTIMIZATION_LEVEL=s \ # 优化编译体积，不影响性能
+            PRODUCT_BUNDLE_IDENTIFIER="${MAIN_BUNDLE_ID}" \
+            VALIDATE_PRODUCT=NO \
+            ENABLE_STRICT_EXTENSION_SIGNING=NO \
+            SKIP_INSTALL=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            GCC_OPTIMIZATION_LEVEL=s \
           echo "✅ Xcodebuild编译完成，产物路径：${BUILD_DIR}"
 
-      # 打包IPA：增加脚本权限+清理，避免执行失败
       - name: Run ipabuild.sh (with fix)
         run: |
-          # 强制增加执行权限，避免脚本无权限
           chmod +x ipabuild.sh || true
-          # 删掉导致崩溃的git submodule update行
           sed -i '' '/git submodule update/d' ipabuild.sh
-          # 执行打包脚本，静默输出
           bash ipabuild.sh > /dev/null 2>&1
           echo "✅ ipabuild.sh打包完成，生成.tipa文件"
 
-      # 格式转换：增加全局查找+容错，避免找不到.tipa文件
       - name: Rename tipa to ipa (global find)
         run: |
-          # 全局查找所有.tipa文件，避免路径变更导致失败
           TIPA_FILES=$(find . -name "*.tipa" -type f)
           if [ -n "$TIPA_FILES" ]; then
             for file in $TIPA_FILES; do
               IPA_FILE="${file%.tipa}.ipa"
-              cp -f "$file" "$IPA_FILE" # 强制覆盖，避免重复文件报错
+              cp -f "$file" "$IPA_FILE"
               echo "✅ 转换完成：$file → $IPA_FILE"
             done
           else
             echo "❌ 未找到.tipa文件，打包失败" && exit 1
           fi
 
-      # 上传产物：重命名产物名+增加路径校验，方便识别
       - name: Upload CloudTrail IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CloudTrail-IPA-${{ github.run_id }} # 增加运行ID，避免产物覆盖
+          name: CloudTrail-IPA-${{ github.run_id }}
           path: |
-            **/*.ipa # 全局匹配ipa，避免路径变更
-            **/*.tipa # 全局匹配tipa，保留原产物
-          if-no-files-found: error # 无文件则报错，及时发现问题
-          retention-days: 7 # 缩短保留时间，节省仓库空间（可改30）
+            **/*.ipa
+            **/*.tipa
+          if-no-files-found: error
+          retention-days: 7
