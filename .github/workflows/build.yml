@@ -14,10 +14,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: false      # 不自动拉取子模块
+          submodules: false
           fetch-depth: 1
 
-      # ✏️ 最终修复：全兼容 Info.plist 键缺失场景 + 路径排查
+      # ✏️ 核心修改：替换为指定的 Bundle ID 和显示名称
       - name: Modify all bundle IDs and display name
         run: |
           # 打印目录结构（排查所有可能的扩展路径）
@@ -33,6 +33,11 @@ jobs:
           # 定义文件路径
           PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
           PLIST_FILE="Geranium/Info.plist"
+          # 自定义参数（你指定的配置）
+          MAIN_BUNDLE_ID="com.cloud.trail"
+          EXTENSION_BUNDLE_ID="${MAIN_BUNDLE_ID}.BookmarkLocation"
+          DISPLAY_NAME="云踪"
+          BUNDLE_NAME="CloudTrail"
 
           # 检查主文件存在性
           if [ ! -f "$PROJECT_FILE" ]; then
@@ -45,22 +50,22 @@ jobs:
           fi
 
           # 1. 全局替换旧 Bundle ID（主应用+扩展）
-          sed -i '' 's/live\.cclerc\.geranium/com.private.CloudRoam/g' "$PROJECT_FILE"
-          sed -i '' 's/com\.private\.CloudRoam\.Bookmark-Location-in-Geranium/com.private.CloudRoam.BookmarkLocation/g' "$PROJECT_FILE"
-          echo "已同步修改主应用+扩展的 Bundle ID"
+          sed -i '' 's/live\.cclerc\.geranium/'"${MAIN_BUNDLE_ID}"'/g' "$PROJECT_FILE"
+          sed -i '' 's/'"${MAIN_BUNDLE_ID}"'\.Bookmark-Location-in-Geranium/'"${EXTENSION_BUNDLE_ID}"'/g' "$PROJECT_FILE"
+          echo "已同步修改主应用+扩展的 Bundle ID：主应用=$MAIN_BUNDLE_ID，扩展=$EXTENSION_BUNDLE_ID"
 
           # 2. 处理主应用 Info.plist 显示名称（兼容键缺失）
-          # CFBundleDisplayName
+          # CFBundleDisplayName（应用显示名称：云踪）
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
-            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" "$PLIST_FILE"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${DISPLAY_NAME}" "$PLIST_FILE"
           else
-            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string CloudRoam" "$PLIST_FILE"
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string ${DISPLAY_NAME}" "$PLIST_FILE"
           fi
-          # CFBundleName
+          # CFBundleName（应用短名称：CloudTrail）
           if /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null; then
-            /usr/libexec/PlistBuddy -c "Set :CFBundleName CloudRoam" "$PLIST_FILE"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName ${BUNDLE_NAME}" "$PLIST_FILE"
           else
-            /usr/libexec/PlistBuddy -c "Add :CFBundleName string CloudRoam" "$PLIST_FILE"
+            /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${BUNDLE_NAME}" "$PLIST_FILE"
           fi
 
           # 3. 处理扩展的 Info.plist（全兼容逻辑）
@@ -77,11 +82,11 @@ jobs:
               if /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST" 2>/dev/null; then
                 # 兼容 CFBundleIdentifier 不存在的情况
                 if /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$EXT_PLIST" 2>/dev/null; then
-                  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.private.CloudRoam.BookmarkLocation" "$EXT_PLIST"
+                  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${EXTENSION_BUNDLE_ID}" "$EXT_PLIST"
                 else
-                  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.private.CloudRoam.BookmarkLocation" "$EXT_PLIST"
+                  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string ${EXTENSION_BUNDLE_ID}" "$EXT_PLIST"
                 fi
-                echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID 为 com.private.CloudRoam.BookmarkLocation"
+                echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID 为 $EXTENSION_BUNDLE_ID"
               else
                 echo "跳过无效的 plist 文件：$EXT_PLIST"
               fi
@@ -90,15 +95,15 @@ jobs:
 
           # 验证修改结果
           echo "=== 修改后的主应用 Info.plist 关键内容 ==="
-          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增（值：$DISPLAY_NAME）"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增（值：$BUNDLE_NAME）"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST_FILE" 2>/dev/null || echo "CFBundleIdentifier: 未配置（将使用 xcodebuild 指定的值）"
 
-      # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
+      # 手动克隆 RootHelper
       - name: Clone RootHelper manually
         run: |
-          rm -rf RootHelper   # 清掉空目录占位
+          rm -rf RootHelper
           git clone https://github.com/c22dev/Geranium-RH.git RootHelper
-          # 让 git 认为子模块已经 checkout，不再尝试拉取失效 commit
           git config submodule.RootHelper.url https://github.com/c22dev/Geranium-RH.git
           git submodule absorbgitdirs
           git config --file .gitmodules submodule.RootHelper.update none
@@ -108,43 +113,35 @@ jobs:
           sudo xcode-select -switch /Applications/Xcode_16.2.app
           xcodebuild -version
 
-      # 👇 新增这一步，安装 iOS 平台运行时，解决 ibtool 找不到 iOS 18.2 的问题
       - name: Install iOS platform
         run: |
           sudo xcodebuild -runFirstLaunch
           xcodebuild -downloadPlatform iOS
 
-      # 安装 Theos 依赖
       - name: Install dependencies
         run: brew install ldid xz
 
-      # 克隆 Theos（不含子模块，后面单独处理 SDK，加快速度）
       - name: Install Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
 
-      # 直接用指定 release 地址下载 iPhoneOS14.5.sdk
       - name: Install iPhoneOS 14.5 SDK
         run: |
-          curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz \
-            -o iPhoneOS14.5.sdk.tar.xz
+          curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz -o iPhoneOS14.5.sdk.tar.xz
           tar -xJf iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
-          echo "已安装 SDK："
           ls $THEOS/sdks/
 
-      # 构建 RootHelper
       - name: Build RootHelper
         run: |
           cd RootHelper
-          # 把 control 里的包名强制转小写
           sed -i '' 's/^Package:.*/Package: geraniumroothelper/' control
           make package FINALPACKAGE=1
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名
+      # ✏️ 核心：Xcodebuild 使用新的 Bundle ID
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -157,31 +154,26 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            PRODUCT_BUNDLE_IDENTIFIER="com.private.CloudRoam" \
+            PRODUCT_BUNDLE_IDENTIFIER="${{ env.MAIN_BUNDLE_ID || 'com.cloud.trail' }}" \
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
             ALTERNATE_OWNER=runner
 
-      # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
         run: |
           chmod +x ipabuild.sh
-          # 删掉会导致崩溃的 git submodule update 行
           sed -i '' '/git submodule update/d' ipabuild.sh
           bash ipabuild.sh
 
-      # 将 .tipa 同时复制一份 .ipa 后缀
       - name: Rename tipa to ipa
         run: |
-          find build/ -name "*.tipa" -exec bash -c \
-            'cp "$1" "${1%.tipa}.ipa"' _ {} \;
+          find build/ -name "*.tipa" -exec bash -c 'cp "$1" "${1%.tipa}.ipa"' _ {} \;
 
-      # 上传产物
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Geranium-IPA
+          name: CloudTrail-IPA
           path: |
             build/*.ipa
             build/*.tipa
