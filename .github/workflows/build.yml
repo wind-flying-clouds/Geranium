@@ -17,33 +17,58 @@ jobs:
           submodules: false      # 不自动拉取子模块
           fetch-depth: 1
 
-      # ✏️ 修改 Bundle ID 和显示名称（修复 21-33 行）
+      # ✏️ 修复：兼容 Info.plist 无 CFBundleDisplayName 键的场景
       - name: Modify bundle ID and display name
         run: |
-          # 先检查关键文件是否存在，避免路径错误
-          if [ ! -f "Geranium.xcodeproj/project.pbxproj" ]; then
-            echo "Error: project.pbxproj not found!"
+          # 打印当前目录和文件结构（关键：帮你确认文件路径）
+          echo "=== 当前工作目录 ==="
+          pwd
+          echo "=== 目录下的文件/文件夹 ==="
+          ls -la
+          echo "=== Geranium 目录下的内容 ==="
+          ls -la Geranium/ || echo "Geranium 目录不存在！"
+
+          # 1. 检查关键文件是否存在
+          PROJECT_FILE="Geranium.xcodeproj/project.pbxproj"
+          PLIST_FILE="Geranium/Info.plist"
+          if [ ! -f "$PROJECT_FILE" ]; then
+            echo "Error: $PROJECT_FILE 不存在！"
             exit 1
           fi
-          if [ ! -f "Geranium/Info.plist" ]; then
-            echo "Error: Info.plist not found!"
+          if [ ! -f "$PLIST_FILE" ]; then
+            echo "Error: $PLIST_FILE 不存在！"
             exit 1
           fi
 
-          # 1. 修改 xcodeproj 中的 Bundle ID（保留原有逻辑，增加容错）
+          # 2. 验证 Info.plist 格式是否合法
+          if ! /usr/libexec/PlistBuddy -c "Print" "$PLIST_FILE" 2>/dev/null; then
+            echo "Error: $PLIST_FILE 不是合法的 plist 文件！"
+            exit 1
+          fi
+
+          # 3. 修改 xcodeproj 中的 Bundle ID
           sed -i '' \
             's/PRODUCT_BUNDLE_IDENTIFIER = live\.cclerc\.geranium/PRODUCT_BUNDLE_IDENTIFIER = com.private.CloudRoam/g' \
-            Geranium.xcodeproj/project.pbxproj
+            "$PROJECT_FILE"
 
-          # 2. 处理 CFBundleDisplayName（先查是否存在，不存在则添加）
-          if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" Geranium/Info.plist 2>/dev/null; then
-            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" Geranium/Info.plist
+          # 4. 处理 CFBundleDisplayName（兼容不存在的情况）
+          if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName CloudRoam" "$PLIST_FILE"
           else
-            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string CloudRoam" Geranium/Info.plist
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string CloudRoam" "$PLIST_FILE"
           fi
 
-          # 3. 修改 CFBundleName（必选键，直接 Set）
-          /usr/libexec/PlistBuddy -c "Set :CFBundleName CloudRoam" Geranium/Info.plist
+          # 5. 处理 CFBundleName（核心修复：兼容不存在的情况）
+          if /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName CloudRoam" "$PLIST_FILE"
+          else
+            /usr/libexec/PlistBuddy -c "Add :CFBundleName string CloudRoam" "$PLIST_FILE"
+          fi
+
+          # 6. 验证修改结果（可选，方便排查）
+          echo "=== 修改后的 Info.plist 关键内容 ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增"
 
       # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
       - name: Clone RootHelper manually
