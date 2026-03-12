@@ -58,18 +58,21 @@ jobs:
           git submodule absorbgitdirs
           git config --file .gitmodules submodule.RootHelper.update none
 
-      # 🚨 核心修复1：强制切换到有完整平台组件的 Xcode 15.4（如果存在）
-      - name: Select Xcode 15.4 (with full iOS 17.x platform)
+      # 强制切换到有完整平台组件的 Xcode 版本
+      - name: Select compatible Xcode version
         run: |
-          # 优先使用 Xcode 15.4，如果不存在则用默认
-          if [ -d "/Applications/Xcode_15.4.app" ]; then
-            sudo xcode-select -switch /Applications/Xcode_15.4.app
+          # 优先使用 Xcode 15.x，如果不存在则用默认
+          XCODE_15_PATH=$(ls -d /Applications/Xcode_15*.app | head -1)
+          if [ -n "$XCODE_15_PATH" ]; then
+            sudo xcode-select -switch "$XCODE_15_PATH"
           else
             XCODE_PATH=$(ls -d /Applications/Xcode*.app | head -1)
             sudo xcode-select -switch "$XCODE_PATH"
           fi
           # 打印可用的 SDK 版本（确认 17.x 存在）
+          echo "=== Xcode 版本信息 ==="
           xcodebuild -version
+          echo "=== 可用 iOS SDK 列表 ==="
           xcodebuild -showsdks | grep iphoneos
 
       - name: Install dependencies
@@ -95,22 +98,22 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 🚨 核心修复2：强制使用 iOS 17.5 SDK + 禁用资源编译 + 跳过扩展构建（临时）
-      - name: Build Geranium (force iOS 17.5 SDK + skip extension)
+      # 🚨 核心修复：修正语法错误 + 完整构建命令
+      - name: Build Geranium (fixed syntax + iOS 17 SDK)
         run: |
-          # 强制使用 iOS 17.5 SDK（如果不存在则用 17.0）
+          # 强制使用 iOS 17.x SDK（优先 17.5，无则 17.0）
           SDK_VERSION=$(xcodebuild -showsdks | grep iphoneos | grep -E "17\.[0-9]" | awk '{print $2}' | sed 's/iphoneos//' | tail -1)
           if [ -z "$SDK_VERSION" ]; then
             SDK_VERSION="17.0"
           fi
           echo "使用兼容的 iOS SDK 版本：$SDK_VERSION"
           
-          # 构建主应用（跳过扩展，避免资源编译错误）
+          # 构建主应用（修正语法：移除行内注释，确保参数连续）
           xcodebuild \
             -project Geranium.xcodeproj \
-            -target Geranium \  # 只构建主 target，不构建扩展
+            -target Geranium \
             -configuration Release \
-            -sdk iphoneos$SDK_VERSION \
+            -sdk iphoneos${SDK_VERSION} \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
@@ -121,23 +124,35 @@ jobs:
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ENABLE_PREVIEWS=NO \
-            # 禁用资源编译（跳过 storyboard/asset catalog 检查）
             ASSETCATALOG_COMPILER_OPTIMIZATION=space \
             SKIP_INSTALL=NO \
             BUILD_LIBRARY_FOR_DISTRIBUTION=NO
 
-      # 打包 IPA（手动打包，避免依赖官方脚本）
-      - name: Package IPA manually (skip extension)
+      # 手动打包 IPA（最稳定的方式）
+      - name: Package IPA manually
         run: |
+          # 检查主应用是否构建成功
+          APP_PATH=$(find build/DerivedData -name "Geranium.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: 主应用构建失败，未找到 Geranium.app！"
+            ls -la build/DerivedData/Build/Products/
+            exit 1
+          fi
+          
           # 创建 IPA 打包目录
-          mkdir -p build/Payload
+          mkdir -p build/IPA/Payload
           # 复制主应用到 Payload
-          cp -R build/DerivedData/Build/Products/Release-iphoneos/Geranium.app build/Payload/
+          cp -R "$APP_PATH" build/IPA/Payload/
           # 打包成 IPA
-          cd build
-          zip -r Geranium-云踪.ipa Payload/
+          cd build/IPA
+          zip -r "../Geranium-云踪_$(date +%Y%m%d).ipa" Payload/
           # 清理临时文件
-          rm -rf Payload
+          cd ../
+          rm -rf IPA
+          
+          # 验证 IPA 是否生成
+          echo "=== 生成的 IPA 文件 ==="
+          ls -la build/*.ipa
 
       # 上传产物
       - name: Upload IPA artifact
