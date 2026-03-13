@@ -24,15 +24,12 @@ jobs:
           echo "Current directory: $(pwd)"
           echo "Directory listing:"
           ls -la
-          echo "Git status:"
-          git status || true
           echo "Available Xcode versions:"
           ls /Applications/ | grep Xcode
-          echo "System information:"
-          sw_vers
-          xcrun --show-sdk-platforms
+          echo "Available iOS SDKs:"
+          ls /Applications/Xcode_*/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/
 
-      # ✏️ 改进的文件修改步骤
+      # ✏️ 改进的文件修改步骤 - 修复 PlistBuddy 问题
       - name: Modify all bundle IDs and display name
         run: |
           # 打印目录结构（排查所有可能的扩展路径）
@@ -75,7 +72,18 @@ jobs:
           # 1. 全局替换旧 Bundle ID（主应用+扩展）—— 纯 ASCII，sed 安全
           echo "修改 project.pbxproj 中的 Bundle ID..."
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE" && echo "主应用Bundle ID修改成功" || echo "主应用Bundle ID修改可能失败"
-          sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE" && echo "扩展Bundle ID修改成功" || echo "扩展Bundle ID修改可能失败"
+          
+          # 修复扩展Bundle ID的路径问题 - 避免空格导致的分词
+          EXTENSION_PBXPROJ_FILE=$(find . -name "*.xcodeproj" -path "*/Bookmark Location in Geranium*" -o -name "*.xcodeproj" -path "*Bookmark*" | head -1)
+          if [ -n "$EXTENSION_PBXPROJ_FILE" ]; then
+            EXT_PROJECT_FILE="$EXTENSION_PBXPROJ_FILE/project.pbxproj"
+            if [ -f "$EXT_PROJECT_FILE" ]; then
+              sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$EXT_PROJECT_FILE" && echo "扩展Bundle ID修改成功" || echo "扩展Bundle ID修改可能失败"
+            fi
+          else
+            # 如果找不到特定扩展项目文件，则在整个项目文件中搜索并替换
+            sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE" && echo "扩展Bundle ID修改成功" || echo "扩展Bundle ID修改可能失败"
+          fi
 
           # 2. 处理主应用 Info.plist 显示名称（兼容键缺失）
           echo "修改主应用 Info.plist 显示名称..."
@@ -97,23 +105,27 @@ jobs:
           fi
 
           # 3. 处理扩展的 Info.plist（全兼容逻辑）
+          # 修复路径中包含空格的问题
           EXT_PLIST_LIST=$(find . -name "Info.plist" -not -path "./build/*" -not -path "./RootHelper/*" | grep -i -E "bookmark|extension|appex" | grep -v "Preview" | grep -v "Assets")
           if [ -z "$EXT_PLIST_LIST" ]; then
             echo "警告：未找到扩展的 Info.plist 文件，跳过扩展 Bundle ID 修改"
           else
             echo "找到扩展 Info.plist 文件列表："
             echo "$EXT_PLIST_LIST"
-            for EXT_PLIST in $EXT_PLIST_LIST; do
-              echo "处理扩展plist: $EXT_PLIST"
-              if /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST" 2>/dev/null; then
-                if /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$EXT_PLIST" 2>/dev/null; then
-                  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
+            # 使用 while 循环读取，避免空格导致的问题
+            echo "$EXT_PLIST_LIST" | while read -r EXT_PLIST; do
+              if [ -n "$EXT_PLIST" ] && [ -f "$EXT_PLIST" ]; then
+                echo "处理扩展plist: $EXT_PLIST"
+                if /usr/libexec/PlistBuddy -c "Print" "$EXT_PLIST" 2>/dev/null; then
+                  if /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$EXT_PLIST" 2>/dev/null; then
+                    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
+                  else
+                    /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
+                  fi
+                  echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID"
                 else
-                  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
+                  echo "跳过无效的 plist 文件：$EXT_PLIST"
                 fi
-                echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID"
-              else
-                echo "跳过无效的 plist 文件：$EXT_PLIST"
               fi
             done
           fi
@@ -127,12 +139,14 @@ jobs:
           echo "=== 查找所有 InfoPlist.strings 本地化文件 ==="
           INFOPLIST_STRINGS_FILES=$(find . -name "InfoPlist.strings" -not -path "./build/*" -not -path "./RootHelper/*")
           if [ -n "$INFOPLIST_STRINGS_FILES" ]; then
-            echo "$INFOPLIST_STRINGS_FILES" | while read f; do
-              echo "处理: $f"
-              # 替换 CFBundleDisplayName
-              sed -i '' 's/CFBundleDisplayName *= *"[^"]*"/CFBundleDisplayName = "云踪"/g' "$f" && echo "已修改 CFBundleDisplayName 在 $f"
-              # 替换 CFBundleName
-              sed -i '' 's/CFBundleName *= *"[^"]*"/CFBundleName = "云踪"/g' "$f" && echo "已修改 CFBundleName 在 $f"
+            echo "$INFOPLIST_STRINGS_FILES" | while read -r f; do
+              if [ -n "$f" ] && [ -f "$f" ]; then
+                echo "处理: $f"
+                # 替换 CFBundleDisplayName
+                sed -i '' 's/CFBundleDisplayName *= *"[^"]*"/CFBundleDisplayName = "云踪"/g' "$f" && echo "已修改 CFBundleDisplayName 在 $f"
+                # 替换 CFBundleName
+                sed -i '' 's/CFBundleName *= *"[^"]*"/CFBundleName = "云踪"/g' "$f" && echo "已修改 CFBundleName 在 $f"
+              fi
             done
           else
             echo "未找到 InfoPlist.strings 文件"
@@ -197,23 +211,38 @@ jobs:
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
           echo "Theos 安装完成"
 
-      # 安装 iPhoneOS SDK
+      # 安装兼容的 iPhoneOS SDK - 使用更现代的 SDK
       - name: Install iPhoneOS SDK
         run: |
           SDK_DIR="$THEOS/sdks"
           mkdir -p "$SDK_DIR"
-          echo "下载并安装 iPhoneOS14.5 SDK..."
-          curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz \
-            -o iPhoneOS14.5.sdk.tar.xz
-          if [ $? -eq 0 ]; then
-            tar -xJf iPhoneOS14.5.sdk.tar.xz -C "$SDK_DIR/"
-            rm iPhoneOS14.5.sdk.tar.xz
-            echo "已安装 SDK："
-            ls "$SDK_DIR/"
+          echo "下载并安装兼容的 iOS SDK..."
+          
+          # 尝试下载较新的 SDK（如果有的话）
+          if ! curl -L --fail -o iPhoneOS.sdk.tar.xz "https://github.com/theos/sdks/releases/download/ios-sdks%2F21.5/iPhoneOS21.5.sdk.tar.xz"; then
+            echo "无法下载最新的 SDK，尝试下载 iOS 18.5 SDK..."
+            if ! curl -L --fail -o iPhoneOS.sdk.tar.xz "https://github.com/theos/sdks/releases/download/ios-sdks%2F18.5/iPhoneOS18.5.sdk.tar.xz"; then
+              echo "无法下载 iOS 18.5 SDK，尝试下载 iOS 17.5 SDK..."
+              if ! curl -L --fail -o iPhoneOS.sdk.tar.xz "https://github.com/theos/sdks/releases/download/ios-sdks%2F17.5/iPhoneOS17.5.sdk.tar.xz"; then
+                echo "无法下载最新的 SDK，使用原来的 14.5 SDK..."
+                curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz -o iPhoneOS14.5.sdk.tar.xz
+                tar -xJf iPhoneOS14.5.sdk.tar.xz -C "$SDK_DIR/"
+                rm iPhoneOS14.5.sdk.tar.xz
+              else
+                tar -xJf iPhoneOS.sdk.tar.xz -C "$SDK_DIR/"
+                rm iPhoneOS.sdk.tar.xz
+              fi
+            else
+              tar -xJf iPhoneOS.sdk.tar.xz -C "$SDK_DIR/"
+              rm iPhoneOS.sdk.tar.xz
+            fi
           else
-            echo "SDK 下载失败，检查网络连接..."
-            exit 1
+            tar -xJf iPhoneOS.sdk.tar.xz -C "$SDK_DIR/"
+            rm iPhoneOS.sdk.tar.xz
           fi
+          
+          echo "已安装 SDK："
+          ls "$SDK_DIR/"
 
       # 构建 RootHelper
       - name: Build RootHelper
@@ -231,18 +260,28 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名
+      # 构建主应用，不签名 - 使用兼容的 SDK
       - name: Build Geranium with Xcode
         run: |
           echo "开始构建主应用..."
           echo "项目文件检查："
           ls -la Geranium.xcodeproj/
+          
+          # 获取可用的 SDK 版本
+          AVAILABLE_SDKS=$(xcodebuild -showsdks | grep iphoneos | grep -o "iphoneos[0-9.]*" | sort -V | tail -1)
+          if [ -z "$AVAILABLE_SDKS" ]; then
+            echo "无法获取可用的 iOS SDK，使用默认的 iphoneos"
+            AVAILABLE_SDKS="iphoneos"
+          fi
+          
+          echo "使用 SDK: $AVAILABLE_SDKS"
+          
           echo "构建命令执行："
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
             -configuration Release \
-            -sdk iphoneos \
+            -sdk "$AVAILABLE_SDKS" \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
@@ -254,6 +293,7 @@ jobs:
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
             ALTERNATE_OWNER=runner \
+            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
             | tee xcodebuild.log
           
           BUILD_RESULT=${PIPESTATUS[0]}
