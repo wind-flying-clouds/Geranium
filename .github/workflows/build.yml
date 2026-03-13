@@ -105,13 +105,12 @@ jobs:
             echo "已修改: $f"
           done
 
-          echo "=== 查找 .xcstrings 文件并修改 CFBundleDisplayName ==="
-          find . -name "*.xcstrings" | while read f; do
-            echo "处理: $f"
-            # xcstrings 是 JSON 格式，替换其中的 Geranium 显示名称值
-            sed -i '' 's/"Geranium"/"云踪"/g' "$f"
-            echo "已修改: $f"
-          done
+          # xcstrings 文件不做修改，避免破坏 Xcode 项目结构
+          # 显示名称已通过以下三处保障：
+          # ① xcodebuild 参数 INFOPLIST_KEY_CFBundleDisplayName
+          # ② PlistBuddy 修改 Info.plist
+          # ③ 构建后直接 patch .app 内 Info.plist（最终兜底）
+          echo "=== xcstrings 跳过修改，由构建参数和后置 patch 保障显示名称 ==="
 
       # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
       - name: Clone RootHelper manually
