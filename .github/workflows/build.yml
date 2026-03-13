@@ -17,10 +17,8 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: Modify bundle IDs
+      - name: Modify bundle IDs and display name
         run: |
-          echo "=== 当前工作目录 ==="
-          pwd
           echo "=== 全局查找所有 Info.plist 文件 ==="
           find . -name "Info.plist"
 
@@ -28,20 +26,47 @@ jobs:
           PLIST_FILE="Geranium/Info.plist"
 
           if [ ! -f "$PROJECT_FILE" ]; then
-            echo "Error: $PROJECT_FILE 不存在！"
-            exit 1
+            echo "Error: $PROJECT_FILE 不存在！"; exit 1
           fi
           if [ ! -f "$PLIST_FILE" ]; then
-            echo "Error: $PLIST_FILE 不存在！"
-            exit 1
+            echo "Error: $PLIST_FILE 不存在！"; exit 1
           fi
 
-          # 1. 替换 Bundle ID（主应用 + 扩展）
+          # ── 1. 替换 Bundle ID（主应用 + 扩展）──────────────────────────
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE"
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
-          echo "已修改主应用 + 扩展的 Bundle ID"
+          echo "已修改 Bundle ID"
 
-          # 2. 处理扩展的 Info.plist Bundle ID
+          # ── 2. 修改主应用 Info.plist 显示名称（直接写文件，最可靠）────
+          # 当项目使用自定义 Info.plist 时（INFOPLIST_FILE 指向文件），
+          # Xcode 会直接读取此文件，这是最终生效的值。
+          for KEY in CFBundleDisplayName CFBundleName; do
+            if /usr/libexec/PlistBuddy -c "Print :${KEY}" "$PLIST_FILE" 2>/dev/null; then
+              /usr/libexec/PlistBuddy -c "Set :${KEY} 云踪" "$PLIST_FILE"
+            else
+              /usr/libexec/PlistBuddy -c "Add :${KEY} string 云踪" "$PLIST_FILE"
+            fi
+          done
+          echo "已修改主应用 Info.plist 显示名称"
+
+          # ── 3. 修改 pbxproj 中的显示名称键（兜底：覆盖 GENERATE_INFOPLIST_FILE=YES 的情况）
+          # 如果项目设置了自动生成 Info.plist，这些键会生效并覆盖上面的文件修改。
+          # 用 Python 处理中文写入，避免 CI 环境 sed locale 问题。
+          python3 - <<'PYEOF'
+          import re, sys
+          path = "Geranium.xcodeproj/project.pbxproj"
+          with open(path, "r", encoding="utf-8") as f:
+              content = f.read()
+          content = re.sub(r'INFOPLIST_KEY_CFBundleDisplayName\s*=\s*[^;]+;',
+                           'INFOPLIST_KEY_CFBundleDisplayName = 云踪;', content)
+          content = re.sub(r'INFOPLIST_KEY_CFBundleName\s*=\s*[^;]+;',
+                           'INFOPLIST_KEY_CFBundleName = 云踪;', content)
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(content)
+          print("已修改 pbxproj 中 INFOPLIST_KEY 显示名称")
+          PYEOF
+
+          # ── 4. 修改扩展 Info.plist Bundle ID ───────────────────────────
           EXT_PLIST_LIST=$(find . -name "Info.plist" | grep -i -E "bookmark|extension|appex" | grep -v "Preview" | grep -v "Assets")
           if [ -z "$EXT_PLIST_LIST" ]; then
             echo "警告：未找到扩展 Info.plist，跳过"
@@ -53,14 +78,16 @@ jobs:
                 else
                   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
                 fi
-                echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID"
+                echo "已修改扩展 plist ($EXT_PLIST) Bundle ID"
               fi
             done
           fi
 
-          echo "=== Bundle ID 修改完成 ==="
+          # ── 验证 ────────────────────────────────────────────────────────
+          echo "=== 验证主应用 Info.plist ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE"
 
-      # 手动克隆 RootHelper
       - name: Clone RootHelper manually
         run: |
           rm -rf RootHelper
@@ -103,8 +130,9 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # ✅ 核心修复：在 xcodebuild 命令行直接传入显示名称参数
-      #    命令行参数优先级最高，覆盖 pbxproj 和 Info.plist 中的所有同名设置
+      # 注意：不传 PRODUCT_NAME（避免主 Target 和扩展 Target 的 Swift 模块名冲突）
+      #       不传 INFOPLIST_KEY_*（项目使用自定义 Info.plist 文件时这些参数无效）
+      #       显示名称已在上方通过 PlistBuddy 直接写入 Info.plist 文件，这才是真正生效的方式
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -118,9 +146,6 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
-            PRODUCT_NAME="云踪" \
-            INFOPLIST_KEY_CFBundleDisplayName="云踪" \
-            INFOPLIST_KEY_CFBundleName="云踪" \
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
