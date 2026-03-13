@@ -49,31 +49,10 @@ jobs:
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
           echo "已同步修改主应用+扩展的 Bundle ID"
 
-          # 2. 用 Python 替换含中文的字段，避免 sed 处理中文时损坏 UTF-8 编码
-          python3 - "$PROJECT_FILE" <<'PYEOF'
-import sys
-
-path = sys.argv[1]
-with open(path, 'r', encoding='utf-8') as f:
-    content = f.read()
-
-replacements = [
-    # 注意：PRODUCT_NAME 不能改为中文，它决定 Swift 模块名，中文会导致编译失败
-    # 显示名称通过以下两个键控制，与模块名无关
-    ('INFOPLIST_KEY_CFBundleDisplayName = Geranium;',   'INFOPLIST_KEY_CFBundleDisplayName = 云踪;'),
-    ('INFOPLIST_KEY_CFBundleName = Geranium;',          'INFOPLIST_KEY_CFBundleName = 云踪;'),
-]
-
-for old, new in replacements:
-    count = content.count(old)
-    content = content.replace(old, new)
-    print(f"替换 '{old}' -> '{new}'，共 {count} 处")
-
-with open(path, 'w', encoding='utf-8') as f:
-    f.write(content)
-
-print("pbxproj 中文字段替换完成")
-PYEOF
+          # 2. 替换 pbxproj 中的显示名称键（PRODUCT_NAME 不改，它决定 Swift 模块名）
+          sed -i '' 's/INFOPLIST_KEY_CFBundleDisplayName = Geranium;/INFOPLIST_KEY_CFBundleDisplayName = 云踪;/g' "$PROJECT_FILE"
+          sed -i '' 's/INFOPLIST_KEY_CFBundleName = Geranium;/INFOPLIST_KEY_CFBundleName = 云踪;/g' "$PROJECT_FILE"
+          echo "已修改 pbxproj 中的显示名称字段"
 
           # 3. 处理主应用 Info.plist 显示名称（兼容键缺失）
           # CFBundleDisplayName
@@ -114,6 +93,25 @@ PYEOF
           echo "=== 修改后的主应用 Info.plist 关键内容 ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleDisplayName: 已新增"
           /usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST_FILE" 2>/dev/null || echo "CFBundleName: 已新增"
+
+          # 5. 修改本地化文件中的显示名称（优先级高于 Info.plist，必须同步修改）
+          echo "=== 查找所有 InfoPlist.strings 本地化文件 ==="
+          find . -name "InfoPlist.strings" | while read f; do
+            echo "处理: $f"
+            # 替换 CFBundleDisplayName
+            sed -i '' 's/CFBundleDisplayName *= *"[^"]*"/CFBundleDisplayName = "云踪"/g' "$f"
+            # 替换 CFBundleName
+            sed -i '' 's/CFBundleName *= *"[^"]*"/CFBundleName = "云踪"/g'  "$f"
+            echo "已修改: $f"
+          done
+
+          echo "=== 查找 .xcstrings 文件并修改 CFBundleDisplayName ==="
+          find . -name "*.xcstrings" | while read f; do
+            echo "处理: $f"
+            # xcstrings 是 JSON 格式，替换其中的 Geranium 显示名称值
+            sed -i '' 's/"Geranium"/"云踪"/g' "$f"
+            echo "已修改: $f"
+          done
 
       # 手动克隆 RootHelper，直接用最新 main 分支，绕开失效的 commit 锁定
       - name: Clone RootHelper manually
@@ -178,10 +176,26 @@ PYEOF
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
+            INFOPLIST_KEY_CFBundleDisplayName="云踪" \
             VALIDATE_PRODUCT=NO \
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
             ALTERNATE_OWNER=runner
+
+      # 构建完成后，直接修改 .app 包内 Info.plist（双保险，确保显示名正确）
+      - name: Patch display name in built app
+        run: |
+          APP_PLIST=$(find build/DerivedData/Build/Products/Release-iphoneos -name "Info.plist" -path "*/Geranium.app/Info.plist" | head -1)
+          if [ -n "$APP_PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 云踪" "$APP_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 云踪" "$APP_PLIST"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName 云踪" "$APP_PLIST" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleName string 云踪" "$APP_PLIST"
+            echo "已修改 .app 内 Info.plist 显示名为 云踪"
+            echo "当前值：$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$APP_PLIST")"
+          else
+            echo "警告：未找到 Geranium.app/Info.plist，跳过"
+          fi
 
       # 运行官方打包脚本生成 .tipa
       - name: Run ipabuild.sh
