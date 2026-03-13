@@ -154,7 +154,7 @@ jobs:
             echo "未找到 InfoPlist.strings 文件"
           fi
 
-      # 修复 Storyboard 文件中的平台版本 - 修正版
+      # 修复 Storyboard 文件中的平台版本 - 重点解决平台支持问题
       - name: Fix Storyboard platform version
         run: |
           STORYBOARD_FILE="Bookmark Location in Geranium/Base.lproj/MainInterface.storyboard"
@@ -165,12 +165,12 @@ jobs:
             temp_file=$(mktemp)
             
             # 修复工具版本和平台版本问题 - 使用兼容的版本
-            sed -E 's/toolsVersion="([^"]*)"/toolsVersion="18122"/g' "$STORYBOARD_FILE" > "$temp_file"
+            sed -E 's/toolsVersion="([0-9]+)(\.[0-9]+)?"/toolsVersion="18122"/g' "$STORYBOARD_FILE" > "$temp_file"
             sed -i '' 's/minimum-deployment-target="[^"]*"/minimum-deployment-target="14.0"/g' "$temp_file"
             sed -i '' 's/minimum-deployment-target = "[^"]*"/minimum-deployment-target = "14.0"/g' "$temp_file"
             
             # 替换平台信息 - 确保兼容性
-            sed -i '' 's/iOS.CocoaTouch/iOS.CocoaTouch/g' "$temp_file"
+            sed -i '' 's/targetRuntime="iOS\.CocoaTouch"/targetRuntime="iOS.CocoaTouch"/g' "$temp_file"
             
             # 备份原文件
             cp "$STORYBOARD_FILE" "${STORYBOARD_FILE}.backup"
@@ -222,25 +222,40 @@ jobs:
           echo "当前 Xcode 版本："
           xcodebuild -version
 
-      # 安装 iOS 平台支持 - 重点修复
+      # 重点修复：安装平台支持
       - name: Install iOS platform support
         run: |
           echo "安装 iOS 平台支持..."
-          # 重新安装平台支持
+          # 确保 Xcode 已完全配置
           sudo xcodebuild -runFirstLaunch
           
-          # 检查平台支持是否正确安装
-          echo "检查平台支持安装状态..."
-          ls -la "/Applications/Xcode_16.2.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/Library/Xcode/Templates/"
-          
-          # 检查 Interface Builder 工具
-          echo "检查 Interface Builder 工具版本..."
-          /Applications/Xcode_16.2.app/Contents/Developer/usr/bin/ibtool --version
-          
-          echo "验证 SDK 可用性："
+          # 检查可用的 SDK
+          echo "检查可用的 SDKs："
           xcodebuild -showsdks
+          
+          # 安装 iOS 14.5 SDK 用于兼容性
+          SDK_DIR="$HOME/Developer/SDKs"
+          mkdir -p "$SDK_DIR"
+          
+          # 检查是否已有iPhoneOS14.5.sdk
+          if [ ! -d "/Applications/Xcode_16.2.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS14.5.sdk" ]; then
+            echo "iPhoneOS14.5 SDK 不存在，尝试下载..."
+            curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz -o iPhoneOS14.5.sdk.tar.xz
+            tar -xJf iPhoneOS14.5.sdk.tar.xz -C "/Applications/Xcode_16.2.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/"
+            rm iPhoneOS14.5.sdk.tar.xz
+          else
+            echo "iPhoneOS14.5 SDK 已存在"
+          fi
+          
+          # 检查平台支持
+          echo "检查 Interface Builder 支持："
+          /usr/bin/ibtool --version
+          
+          # 检查是否能识别iOS平台
+          echo "检查iOS平台识别情况..."
+          ls -la "/Applications/Xcode_16.2.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/"
 
-      # 安装 Theos 依赖
+      # 安装依赖
       - name: Install dependencies
         run: |
           echo "安装依赖："
@@ -253,22 +268,6 @@ jobs:
           git clone --recursive https://github.com/theos/theos.git $HOME/theos
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
           echo "Theos 安装完成"
-
-      # 安装兼容的 iPhoneOS SDK
-      - name: Install iPhoneOS SDK
-        run: |
-          SDK_DIR="$THEOS/sdks"
-          mkdir -p "$SDK_DIR"
-          echo "下载并安装兼容的 iOS SDK..."
-          
-          # 使用 iPhoneOS14.5 SDK，这是广泛兼容的版本
-          echo "使用 iPhoneOS14.5 SDK..."
-          curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz -o iPhoneOS14.5.sdk.tar.xz
-          tar -xJf iPhoneOS14.5.sdk.tar.xz -C "$SDK_DIR/"
-          rm iPhoneOS14.5.sdk.tar.xz
-          
-          echo "已安装 SDK："
-          ls "$SDK_DIR/"
 
       # 构建 RootHelper
       - name: Build RootHelper
@@ -286,20 +285,23 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，使用兼容的iOS SDK版本
-      - name: Build Geranium with Xcode - Compatible SDK
+      # 构建主应用，使用正确的目标设备
+      - name: Build Geranium with Xcode - Correct Destination
         run: |
           echo "开始构建主应用..."
           echo "项目文件检查："
           ls -la Geranium.xcodeproj/
           
-          # 使用 iPhoneOS14.5 SDK 来避免平台支持问题
-          echo "使用 iPhoneOS14.5 SDK 进行构建..."
+          # 先列出可用的目标设备
+          echo "列出可用的构建目标："
+          xcodebuild -list -project Geranium.xcodeproj
+          
+          # 使用正确的构建命令
+          echo "使用正确的构建命令..."
           xcodebuild \
             -project Geranium.xcodeproj \
             -scheme Geranium \
             -configuration Release \
-            -sdk iphoneos14.5 \
             -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
@@ -319,16 +321,20 @@ jobs:
           if [ $BUILD_RESULT -ne 0 ]; then
             echo "构建失败，查看日志："
             tail -100 xcodebuild.log
-            # 尝试使用不同的构建方式
-            echo "尝试使用 xcodebuild archive 命令..."
+            
+            # 尝试使用具体的SDK和设备目标
+            echo "尝试使用具体的SDK和设备目标..."
+            # 检查可用的iOS模拟器
+            echo "可用的模拟器："
+            xcrun simctl list devices available
+            
+            # 尝试使用iOS模拟器目标
             xcodebuild \
               -project Geranium.xcodeproj \
               -scheme Geranium \
               -configuration Release \
-              -sdk iphoneos14.5 \
-              -destination "generic/platform=iOS" \
-              -archivePath "build/Geranium.xcarchive" \
-              archive \
+              -destination "platform=iOS Simulator,name=iPhone 14 Pro,OS=16.0" \
+              -derivedDataPath build/DerivedData \
               CODE_SIGNING_ALLOWED=NO \
               CODE_SIGN_IDENTITY="" \
               CODE_SIGNING_REQUIRED=NO \
@@ -338,58 +344,37 @@ jobs:
               ENABLE_STRICT_EXTENSION_SIGNING=NO \
               IPHONEOS_DEPLOYMENT_TARGET=14.0 \
               GCC_PREPROCESSOR_DEFINITIONS='$(GCC_PREPROCESSOR_DEFINITIONS) DEBUG=1' \
-              | tee xcodebuild-archive.log
+              | tee xcodebuild-simulator.log
             
-            ARCHIVE_RESULT=${PIPESTATUS[0]}
-            if [ $ARCHIVE_RESULT -ne 0 ]; then
-              echo "归档也失败，检查是否有其他错误..."
-              # 尝试使用最低版本的iOS SDK
-              echo "尝试使用最新的可用SDK..."
-              AVAILABLE_SDKS=$(xcodebuild -showsdks | grep iphoneos | grep -o "iphoneos[0-9.]*" | sort -V | tail -1)
-              if [ -n "$AVAILABLE_SDKS" ]; then
-                echo "使用 $AVAILABLE_SDKS 进行构建..."
-                xcodebuild \
-                  -project Geranium.xcodeproj \
-                  -scheme Geranium \
-                  -configuration Release \
-                  -sdk "$AVAILABLE_SDKS" \
-                  -destination "generic/platform=iOS" \
-                  -derivedDataPath build/DerivedData \
-                  CODE_SIGNING_ALLOWED=NO \
-                  CODE_SIGN_IDENTITY="" \
-                  CODE_SIGNING_REQUIRED=NO \
-                  PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
-                  INFOPLIST_KEY_CFBundleDisplayName="云踪" \
-                  VALIDATE_PRODUCT=NO \
-                  ENABLE_STRICT_EXTENSION_SIGNING=NO \
-                  IPHONEOS_DEPLOYMENT_TARGET=14.0 \
-                  GCC_PREPROCESSOR_DEFINITIONS='$(GCC_PREPROCESSOR_DEFINITIONS) DEBUG=1' \
-                  | tee xcodebuild-fallback.log
-                  
-                FINAL_BUILD_RESULT=${PIPESTATUS[0]}
-                if [ $FINAL_BUILD_RESULT -ne 0 ]; then
-                  echo "所有构建方式均失败"
-                  exit $FINAL_BUILD_RESULT
-                else
-                  echo "构建成功（使用 $AVAILABLE_SDKS）"
-                fi
+            SIMULATOR_RESULT=${PIPESTATUS[0]}
+            if [ $SIMULATOR_RESULT -ne 0 ]; then
+              # 最后尝试直接构建，不指定设备
+              echo "最后尝试直接构建，不指定设备..."
+              xcodebuild \
+                -project Geranium.xcodeproj \
+                -scheme Geranium \
+                -configuration Release \
+                -derivedDataPath build/DerivedData \
+                CODE_SIGNING_ALLOWED=NO \
+                CODE_SIGN_IDENTITY="" \
+                CODE_SIGNING_REQUIRED=NO \
+                PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
+                INFOPLIST_KEY_CFBundleDisplayName="云踪" \
+                VALIDATE_PRODUCT=NO \
+                ENABLE_STRICT_EXTENSION_SIGNING=NO \
+                IPHONEOS_DEPLOYMENT_TARGET=14.0 \
+                GCC_PREPROCESSOR_DEFINITIONS='$(GCC_PREPROCESSOR_DEFINITIONS) DEBUG=1' \
+                | tee xcodebuild-direct.log
+                
+              DIRECT_RESULT=${PIPESTATUS[0]}
+              if [ $DIRECT_RESULT -ne 0 ]; then
+                echo "所有构建方式均失败"
+                exit $DIRECT_RESULT
               else
-                echo "没有可用的 iOS SDK"
-                exit 1
+                echo "构建成功（直接构建）"
               fi
             else
-              echo "归档成功，继续导出 IPA..."
-              xcodebuild \
-                -exportArchive \
-                -archivePath "build/Geranium.xcarchive" \
-                -exportPath "build/" \
-                -exportFormat IPA \
-                | tee xcodebuild-export.log
-              
-              EXPORT_RESULT=${PIPESTATUS[0]}
-              if [ $EXPORT_RESULT -ne 0 ]; then
-                echo "导出失败，但仍尝试查找构建产物..."
-              fi
+              echo "构建成功（模拟器目标）"
             fi
           fi
           echo "构建过程完成！"
