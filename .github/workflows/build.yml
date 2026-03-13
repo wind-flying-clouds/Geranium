@@ -57,6 +57,12 @@ jobs:
           sed -i '' '/PRODUCT_NAME = Geranium;/s/PRODUCT_NAME = Geranium;/PRODUCT_NAME = 云踪;/' "$PROJECT_FILE"
           echo "已修改主应用 PRODUCT_NAME 为 云踪"
 
+          # 5. 修改 pbxproj 中 Xcode 自动生成 Info.plist 时使用的显示名称键
+          #    Xcode 13+ 项目这两个键优先级高于 Info.plist 文件，必须同步替换
+          sed -i '' 's/INFOPLIST_KEY_CFBundleDisplayName = Geranium;/INFOPLIST_KEY_CFBundleDisplayName = 云踪;/g' "$PROJECT_FILE"
+          sed -i '' 's/INFOPLIST_KEY_CFBundleName = Geranium;/INFOPLIST_KEY_CFBundleName = 云踪;/g' "$PROJECT_FILE"
+          echo "已修改 pbxproj 中 INFOPLIST_KEY_CFBundleDisplayName / CFBundleName 为 云踪"
+
           # 2. 处理主应用 Info.plist 显示名称（兼容键缺失）
           # CFBundleDisplayName
           if /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_FILE" 2>/dev/null; then
