@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: false      # 不自动拉取子模块
+          submodules: false
           fetch-depth: 1
 
       # 调试信息收集
@@ -154,27 +154,30 @@ jobs:
             echo "未找到 InfoPlist.strings 文件"
           fi
 
-      # 检查并修复 Storyboard 文件中的平台版本
+      # 修复 Storyboard 文件中的平台版本
       - name: Fix Storyboard platform version
         run: |
           STORYBOARD_FILE="Bookmark Location in Geranium/Base.lproj/MainInterface.storyboard"
           if [ -f "$STORYBOARD_FILE" ]; then
             echo "修复 Storyboard 文件中的平台版本..."
             
-            # 检查当前平台版本
-            echo "当前 Storyboard 内容："
-            grep -A 10 -B 10 "iOS" "$STORYBOARD_FILE" || echo "未在 Storyboard 中找到 iOS 版本信息"
+            # 创建临时文件
+            temp_file=$(mktemp)
             
-            # 尝试更新到可用的 iOS 版本
-            # 首先备份原文件
+            # 替换可能的iOS版本字符串，使用更通用的格式
+            sed -E 's/(toolsVersion=")([0-9.]+)(" targetRuntime="iOS\.CocoaTouch)/\122505\2\3/g' "$STORYBOARD_FILE" > "$temp_file"
+            sed -i '' 's/minimum-deployment-target="[^"]*"/minimum-deployment-target="16.0"/g' "$temp_file"
+            sed -i '' 's/minimum-deployment-target = "[^"]*"/minimum-deployment-target = "16.0"/g' "$temp_file"
+            
+            # 备份原文件
             cp "$STORYBOARD_FILE" "${STORYBOARD_FILE}.backup"
             
-            # 更新最小部署目标和平台版本
-            sed -i '' 's/minimum-deployment-target[[:space:]]*=[[:space:]]*[^[:space:]]*/minimum-deployment-target = "16.0"/g' "$STORYBOARD_FILE"
+            # 移动临时文件到原位置
+            mv "$temp_file" "$STORYBOARD_FILE"
             
             echo "Storyboard 文件已更新"
             echo "更新后的内容："
-            grep -A 5 -B 5 "minimum-deployment-target\|iOS" "$STORYBOARD_FILE" || echo "未找到相关配置"
+            grep -A 5 -B 5 "minimum-deployment-target\|iOS\|toolsVersion" "$STORYBOARD_FILE" || echo "未找到相关配置"
           else
             echo "警告：未找到 Storyboard 文件: $STORYBOARD_FILE"
           fi
@@ -238,14 +241,14 @@ jobs:
           echo "THEOS=$HOME/theos" >> $GITHUB_ENV
           echo "Theos 安装完成"
 
-      # 安装兼容的 iPhoneOS SDK
+      # 安装兼容的 iPhoneOS SDK - 使用已知兼容的版本
       - name: Install iPhoneOS SDK
         run: |
           SDK_DIR="$THEOS/sdks"
           mkdir -p "$SDK_DIR"
           echo "下载并安装兼容的 iOS SDK..."
           
-          # 使用已知存在的 SDK 版本
+          # 使用 iPhoneOS14.5 SDK，这是广泛兼容的版本
           echo "使用 iPhoneOS14.5 SDK..."
           curl -L https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS14.5.sdk.tar.xz -o iPhoneOS14.5.sdk.tar.xz
           tar -xJf iPhoneOS14.5.sdk.tar.xz -C "$SDK_DIR/"
@@ -270,30 +273,21 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 构建主应用，不签名 - 使用更兼容的设置
+      # 构建主应用，使用兼容的iOS SDK版本
       - name: Build Geranium with Xcode
         run: |
           echo "开始构建主应用..."
           echo "项目文件检查："
           ls -la Geranium.xcodeproj/
           
-          # 获取可用的 SDK 版本
-          AVAILABLE_SDKS=$(xcodebuild -showsdks | grep iphoneos | grep -o "iphoneos[0-9.]*" | sort -V | tail -1)
+          # 获取可用的 SDK 版本，优先使用较低版本
+          AVAILABLE_SDKS=$(xcodebuild -showsdks | grep iphoneos | grep -o "iphoneos[0-9.]*" | sort -V | head -1)
           if [ -z "$AVAILABLE_SDKS" ]; then
-            echo "无法获取可用的 iOS SDK，使用默认的 iphoneos"
-            AVAILABLE_SDKS="iphoneos"
+            echo "无法获取可用的 iOS SDK，使用默认的 iphoneos14.5"
+            AVAILABLE_SDKS="iphoneos14.5"
           fi
           
           echo "使用 SDK: $AVAILABLE_SDKS"
-          
-          # 检查扩展的 Storyboard 是否存在
-          EXT_STORYBOARD="Bookmark Location in Geranium/Base.lproj/MainInterface.storyboard"
-          if [ -f "$EXT_STORYBOARD" ]; then
-            echo "扩展 Storyboard 存在，内容预览："
-            head -20 "$EXT_STORYBOARD"
-          else
-            echo "警告：扩展 Storyboard 不存在: $EXT_STORYBOARD"
-          fi
           
           echo "构建命令执行："
           xcodebuild \
@@ -312,8 +306,7 @@ jobs:
             ENABLE_STRICT_EXTENSION_SIGNING=NO \
             ALTERNATE_GROUP=staff \
             ALTERNATE_OWNER=runner \
-            IPHONEOS_DEPLOYMENT_TARGET=16.0 \
-            GCC_PREPROCESSOR_DEFINITIONS='$(GCC_PREPROCESSOR_DEFINITIONS) DEBUG=1' \
+            IPHONEOS_DEPLOYMENT_TARGET=14.5 \
             | tee xcodebuild.log
           
           BUILD_RESULT=${PIPESTATUS[0]}
@@ -337,13 +330,38 @@ jobs:
               INFOPLIST_KEY_CFBundleDisplayName="云踪" \
               VALIDATE_PRODUCT=NO \
               ENABLE_STRICT_EXTENSION_SIGNING=NO \
-              IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+              IPHONEOS_DEPLOYMENT_TARGET=14.5 \
               | tee xcodebuild-archive.log
             
             ARCHIVE_RESULT=${PIPESTATUS[0]}
             if [ $ARCHIVE_RESULT -ne 0 ]; then
               echo "归档也失败，检查是否有其他错误..."
-              exit $ARCHIVE_RESULT
+              # 再次尝试使用不同的 SDK
+              echo "尝试使用 iphoneos SDK..."
+              xcodebuild \
+                -project Geranium.xcodeproj \
+                -scheme Geranium \
+                -configuration Release \
+                -sdk iphoneos \
+                -destination "generic/platform=iOS" \
+                -derivedDataPath build/DerivedData \
+                CODE_SIGNING_ALLOWED=NO \
+                CODE_SIGN_IDENTITY="" \
+                CODE_SIGNING_REQUIRED=NO \
+                PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
+                INFOPLIST_KEY_CFBundleDisplayName="云踪" \
+                VALIDATE_PRODUCT=NO \
+                ENABLE_STRICT_EXTENSION_SIGNING=NO \
+                IPHONEOS_DEPLOYMENT_TARGET=14.5 \
+                | tee xcodebuild-iphoneos.log
+              
+              FINAL_BUILD_RESULT=${PIPESTATUS[0]}
+              if [ $FINAL_BUILD_RESULT -ne 0 ]; then
+                echo "所有构建方式均失败"
+                exit $FINAL_BUILD_RESULT
+              else
+                echo "构建成功（使用 iphoneos SDK）"
+              fi
             else
               echo "归档成功，继续导出 IPA..."
               xcodebuild \
