@@ -49,10 +49,9 @@ jobs:
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
           echo "已同步修改主应用+扩展的 Bundle ID"
 
-          # 2. 替换 pbxproj 中的显示名称键（PRODUCT_NAME 不改，它决定 Swift 模块名）
-          sed -i '' 's/INFOPLIST_KEY_CFBundleDisplayName = Geranium;/INFOPLIST_KEY_CFBundleDisplayName = 云踪;/g' "$PROJECT_FILE"
-          sed -i '' 's/INFOPLIST_KEY_CFBundleName = Geranium;/INFOPLIST_KEY_CFBundleName = 云踪;/g' "$PROJECT_FILE"
-          echo "已修改 pbxproj 中的显示名称字段"
+          # 2. pbxproj 只做纯 ASCII 修改（Bundle ID），不写入中文
+          # pbxproj 是 ASCII 格式，写入中文会导致 Xcode 报 JSON 解析错误
+          echo "pbxproj 仅修改 Bundle ID，跳过中文写入"
 
           # 3. 处理主应用 Info.plist 显示名称（兼容键缺失）
           # CFBundleDisplayName
