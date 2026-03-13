@@ -126,7 +126,6 @@ jobs:
       - name: Install iOS platform
         run: |
           sudo xcodebuild -runFirstLaunch
-          xcodebuild -downloadPlatform iOS
 
       # 安装 Theos 依赖
       - name: Install dependencies
