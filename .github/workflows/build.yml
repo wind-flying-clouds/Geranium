@@ -19,6 +19,8 @@ jobs:
 
       - name: Modify bundle IDs
         run: |
+          echo "=== 当前工作目录 ==="
+          pwd
           echo "=== 全局查找所有 Info.plist 文件 ==="
           find . -name "Info.plist"
 
@@ -26,18 +28,20 @@ jobs:
           PLIST_FILE="Geranium/Info.plist"
 
           if [ ! -f "$PROJECT_FILE" ]; then
-            echo "Error: $PROJECT_FILE 不存在！"; exit 1
+            echo "Error: $PROJECT_FILE 不存在！"
+            exit 1
           fi
           if [ ! -f "$PLIST_FILE" ]; then
-            echo "Error: $PLIST_FILE 不存在！"; exit 1
+            echo "Error: $PLIST_FILE 不存在！"
+            exit 1
           fi
 
           # 1. 替换 Bundle ID（主应用 + 扩展）
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE"
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
-          echo "已修改 Bundle ID"
+          echo "已修改主应用 + 扩展的 Bundle ID"
 
-          # 2. 修改扩展 Info.plist 的 Bundle ID
+          # 2. 处理扩展的 Info.plist Bundle ID
           EXT_PLIST_LIST=$(find . -name "Info.plist" | grep -i -E "bookmark|extension|appex" | grep -v "Preview" | grep -v "Assets")
           if [ -z "$EXT_PLIST_LIST" ]; then
             echo "警告：未找到扩展 Info.plist，跳过"
@@ -49,10 +53,12 @@ jobs:
                 else
                   /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.cloud.trail.BookmarkLocation" "$EXT_PLIST"
                 fi
-                echo "已修改扩展 plist ($EXT_PLIST) Bundle ID"
+                echo "已修改扩展 plist ($EXT_PLIST) 的 Bundle ID"
               fi
             done
           fi
+
+          echo "=== Bundle ID 修改完成 ==="
 
       # 手动克隆 RootHelper
       - name: Clone RootHelper manually
@@ -97,11 +103,8 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # ✅ 核心修复：
-      #    - 移除 PRODUCT_NAME=云踪（它是 Swift 模块名，全局传入会让主 Target 和扩展 Target
-      #      都叫"云踪"，导致 .swiftmodule 文件路径冲突 → BUILD FAILED）
-      #    - 只传 INFOPLIST_KEY_CFBundleDisplayName / CFBundleName 控制屏幕显示名称
-      #      这两个键仅影响 Info.plist 注入，不影响模块命名，安全无副作用
+      # ✅ 核心修复：在 xcodebuild 命令行直接传入显示名称参数
+      #    命令行参数优先级最高，覆盖 pbxproj 和 Info.plist 中的所有同名设置
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
@@ -115,6 +118,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="com.cloud.trail" \
+            PRODUCT_NAME="云踪" \
             INFOPLIST_KEY_CFBundleDisplayName="云踪" \
             INFOPLIST_KEY_CFBundleName="云踪" \
             VALIDATE_PRODUCT=NO \
