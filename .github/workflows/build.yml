@@ -32,41 +32,25 @@ jobs:
             echo "Error: $PLIST_FILE 不存在！"; exit 1
           fi
 
-          # ── 1. 替换 Bundle ID（主应用 + 扩展）──────────────────────────
+          # ── 1. 替换 Bundle ID（只改 ASCII 字符，pbxproj 安全）────────────
           sed -i '' 's/live\.cclerc\.geranium/com.cloud.trail/g' "$PROJECT_FILE"
           sed -i '' 's/com\.cloud\.trail\.Bookmark-Location-in-Geranium/com.cloud.trail.BookmarkLocation/g' "$PROJECT_FILE"
           echo "已修改 Bundle ID"
 
-          # ── 2. 修改主应用 Info.plist 显示名称（直接写文件，最可靠）────
-          # 当项目使用自定义 Info.plist 时（INFOPLIST_FILE 指向文件），
-          # Xcode 会直接读取此文件，这是最终生效的值。
+          # ── 2. 用 PlistBuddy 直接写主应用 Info.plist 显示名称 ───────────
+          # 这是使用自定义 Info.plist 项目的唯一正确方式
+          # PlistBuddy 原生支持 UTF-8，中文写入100%安全
           for KEY in CFBundleDisplayName CFBundleName; do
             if /usr/libexec/PlistBuddy -c "Print :${KEY}" "$PLIST_FILE" 2>/dev/null; then
               /usr/libexec/PlistBuddy -c "Set :${KEY} 云踪" "$PLIST_FILE"
+              echo "已更新 $KEY"
             else
               /usr/libexec/PlistBuddy -c "Add :${KEY} string 云踪" "$PLIST_FILE"
+              echo "已新增 $KEY"
             fi
           done
-          echo "已修改主应用 Info.plist 显示名称"
 
-          # ── 3. 修改 pbxproj 中的显示名称键（兜底：覆盖 GENERATE_INFOPLIST_FILE=YES 的情况）
-          # 如果项目设置了自动生成 Info.plist，这些键会生效并覆盖上面的文件修改。
-          # 用 Python 处理中文写入，避免 CI 环境 sed locale 问题。
-          python3 - <<'PYEOF'
-          import re, sys
-          path = "Geranium.xcodeproj/project.pbxproj"
-          with open(path, "r", encoding="utf-8") as f:
-              content = f.read()
-          content = re.sub(r'INFOPLIST_KEY_CFBundleDisplayName\s*=\s*[^;]+;',
-                           'INFOPLIST_KEY_CFBundleDisplayName = 云踪;', content)
-          content = re.sub(r'INFOPLIST_KEY_CFBundleName\s*=\s*[^;]+;',
-                           'INFOPLIST_KEY_CFBundleName = 云踪;', content)
-          with open(path, "w", encoding="utf-8") as f:
-              f.write(content)
-          print("已修改 pbxproj 中 INFOPLIST_KEY 显示名称")
-          PYEOF
-
-          # ── 4. 修改扩展 Info.plist Bundle ID ───────────────────────────
+          # ── 3. 修改扩展 Info.plist Bundle ID ───────────────────────────
           EXT_PLIST_LIST=$(find . -name "Info.plist" | grep -i -E "bookmark|extension|appex" | grep -v "Preview" | grep -v "Assets")
           if [ -z "$EXT_PLIST_LIST" ]; then
             echo "警告：未找到扩展 Info.plist，跳过"
@@ -130,9 +114,6 @@ jobs:
         env:
           THEOS: ${{ env.THEOS }}
 
-      # 注意：不传 PRODUCT_NAME（避免主 Target 和扩展 Target 的 Swift 模块名冲突）
-      #       不传 INFOPLIST_KEY_*（项目使用自定义 Info.plist 文件时这些参数无效）
-      #       显示名称已在上方通过 PlistBuddy 直接写入 Info.plist 文件，这才是真正生效的方式
       - name: Build Geranium with Xcode
         run: |
           xcodebuild \
